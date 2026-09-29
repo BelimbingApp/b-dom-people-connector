@@ -66,12 +66,12 @@ jobs:
           ref: ${{ steps.pin.outputs.revision }}
           path: bilimbi
 
-      - name: Check out People scaffold
+      - name: Check out People
         if: matrix.topology == 'both' || matrix.topology == 'people_only'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: BelimbingApp/b-dom-people
-          ref: fm/people-scaffold
+          ref: main
           path: people
 
       - name: Mount People

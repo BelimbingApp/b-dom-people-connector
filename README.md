@@ -40,8 +40,7 @@ missing dependency people/workforce`.
 revision in [`.github/bilimbi-revision`](.github/bilimbi-revision). It verifies
 both mounted, People alone, neither mounted, and the expected failure when
 Connector is mounted without People. Update the pin when adopting a newer
-Bilimbi revision. The People checkout uses the `fm/people-scaffold` branch
-while that scaffold is pending; switch CI to `main` after it merges.
+Bilimbi revision. The People checkout uses its `main` branch.
 
 ## License
 
