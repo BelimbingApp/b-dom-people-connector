@@ -9,11 +9,12 @@ It does not build as a standalone Mix project.
 
 | Module | Descriptor ID | Future ownership |
 | --- | --- | --- |
-| [`connector/`](connector/docs/README.md) | `people_connector/connector` | integration contracts, connections, projections, reconciliation |
+| [`connector/`](connector/docs/README.md) | `people_connector/connector` | integration contracts and disconnected state; later connections, projections, reconciliation |
 | [`native_people_adapter/`](native_people_adapter/docs/README.md) | `people_connector/native_people_adapter` | in-process People Workforce adapter |
 
-This is a composition scaffold only: it has no business tables, migrations,
-transport, routes, capabilities, or menu entries. New persistence will use a
+The Connector module has provider-neutral contracts, a capability registry and
+an authorized disconnected-state route. It has no business tables, migrations,
+transport, activated connections, or menu entries. New persistence will use a
 fresh Bilimbi schema. No legacy People users or data are being migrated.
 
 ## Mount
