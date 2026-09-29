@@ -13,8 +13,11 @@ company-scoped connection contract exists. The read and write port behaviours
 are neutral placeholders for that later resolver, not callable provider access.
 
 `Connector.status/2` requires a validated tenant scope and explicit platform
-company ID. It returns a disconnected status with separate platform and
-workforce company IDs, and refuses absent, cross-tenant, or inactive companies.
+company ID. It consumes People Workforce's `ReadResult` and uses its company
+mapping only when `require_current/1` succeeds. Stale or unavailable identity
+returns `{:error, {:not_current, freshness}}`, never a usable port. Current
+reads return disconnected status with separate platform and workforce company
+IDs; absent, cross-tenant, or inactive companies are refused.
 The authorized `/integrations/people/connections` route displays this state
 and has no activation controls or menu leaf. Its capability is
 `people-connector.connections.view`; menu visibility waits for connection setup.

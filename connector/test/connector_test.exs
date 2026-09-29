@@ -4,11 +4,14 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
   alias Bilimbi.Base.Repo
   alias Bilimbi.Base.Tenancy
   alias Bilimbi.Core.Company.TestFixtures, as: CompanyFixtures
+  alias Bilimbi.People.Workforce
+  alias Bilimbi.People.Workforce.ReadResult
   alias Bilimbi.PeopleConnector.Connector
   alias Bilimbi.PeopleConnector.Connector.Capability
   alias Bilimbi.PeopleConnector.Connector.Provider
   alias Bilimbi.PeopleConnector.Connector.ReadPort
   alias Bilimbi.PeopleConnector.Connector.Registry
+  alias Bilimbi.PeopleConnector.Connector.Status
   alias Bilimbi.PeopleConnector.Connector.WritePort
 
   setup do
@@ -43,6 +46,21 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
     end
 
     assert {:error, :not_found} = Connector.status(other_scope, 73)
+  end
+
+  test "stale and unavailable workforce identity never become a usable company mapping", %{
+    scope: scope
+  } do
+    assert {:ok, %ReadResult{value: company}} = Workforce.company(scope, 73)
+    last_confirmed_at = DateTime.utc_now()
+
+    assert {:error, {:not_current, {:stale, ^last_confirmed_at}}} =
+             Status.from_workforce_result(ReadResult.stale(company, last_confirmed_at))
+
+    assert {:error, {:not_current, {:unavailable, :provider_offline}}} =
+             Status.from_workforce_result(ReadResult.unavailable(:provider_offline))
+
+    assert {:error, :not_found} = Status.from_workforce_result(ReadResult.current(nil))
   end
 
   test "registered declarations refuse writes, other ports, unknown capabilities and all use while disconnected",

@@ -35,16 +35,32 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
   end
 
   defp select_company(%{assigns: %{companies: []}} = socket, _company_id),
-    do: assign(socket, company: nil, connection_status: nil)
+    do: assign(socket, company: nil, connection_status: nil, freshness_notice: nil)
 
   defp select_company(%{assigns: %{companies: [first | _] = companies}} = socket, company_id) do
     company = Enum.find(companies, first, &(Integer.to_string(&1.id) == company_id))
 
     case Connector.status(socket.assigns.current_scope.scope, company.id) do
-      {:ok, status} -> assign(socket, company: company, connection_status: status)
-      {:error, :not_found} -> assign(socket, company: nil, connection_status: nil)
+      {:ok, status} ->
+        assign(socket, company: company, connection_status: status, freshness_notice: nil)
+
+      {:error, {:not_current, freshness}} ->
+        assign(socket,
+          company: company,
+          connection_status: nil,
+          freshness_notice: freshness_notice(freshness)
+        )
+
+      {:error, :not_found} ->
+        assign(socket, company: nil, connection_status: nil, freshness_notice: nil)
     end
   end
+
+  defp freshness_notice({:stale, %DateTime{}}),
+    do: "Workforce identity is out of date. Connection information is unavailable."
+
+  defp freshness_notice({:unavailable, _reason}),
+    do: "Workforce identity is unavailable. Connection information cannot be shown."
 
   @impl true
   def render(assigns) do
@@ -90,6 +106,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
             id="people-connections-disconnected"
             title="No workforce connection is configured."
             reason="Provider setup and synchronization are not available yet."
+          />
+        </div>
+
+        <div :if={@freshness_notice} class="mt-5 rounded-xl border border-line bg-surface px-4 py-8">
+          <.empty_state
+            id="people-connections-workforce-unavailable"
+            title="Workforce information is unavailable."
+            reason={@freshness_notice}
           />
         </div>
       </.page>

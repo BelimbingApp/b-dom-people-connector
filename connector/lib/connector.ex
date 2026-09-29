@@ -11,22 +11,19 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
   alias Bilimbi.Base.Tenancy.Scope
   alias Bilimbi.People.Workforce
+  alias Bilimbi.People.Workforce.ReadResult
   alias Bilimbi.PeopleConnector.Connector.Registry
   alias Bilimbi.PeopleConnector.Connector.Status
 
-  @type refusal :: :not_found | :unsupported | :disconnected
+  @type refusal ::
+          :not_found | :unsupported | :disconnected | {:not_current, ReadResult.freshness()}
 
   @doc "The company-scoped connection state before any connection is configured."
-  @spec status(Scope.t(), term()) :: {:ok, Status.t()} | {:error, :not_found}
+  @spec status(Scope.t(), term()) ::
+          {:ok, Status.t()} | {:error, :not_found | {:not_current, ReadResult.freshness()}}
   def status(%Scope{} = scope, platform_company_id) do
-    with {:ok, company} <- Workforce.company(scope, platform_company_id) do
-      {:ok,
-       %Status{
-         state: :disconnected,
-         platform_company_id: company.platform_company_id,
-         workforce_company_id: company.workforce_company_id,
-         provider_id: nil
-       }}
+    with {:ok, result} <- Workforce.company(scope, platform_company_id) do
+      Status.from_workforce_result(result)
     end
   end
 
