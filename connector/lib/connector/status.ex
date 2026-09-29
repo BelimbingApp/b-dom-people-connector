@@ -1,17 +1,33 @@
 defmodule Bilimbi.PeopleConnector.Connector.Status do
-  @moduledoc "A scoped connection status with both company identity axes."
+  @moduledoc """
+  A scoped connection status with both company identity axes.
+
+  `platform_company_id` is the Core Company in the caller's tenant;
+  `workforce_company_id` is the People Workforce company it maps to. The
+  state is `:disconnected` without a stored connection, otherwise `:disabled`
+  or `:enabled`. `credential_stored?` reports only whether a secret exists.
+  """
 
   alias Bilimbi.People.Workforce.Company, as: WorkforceCompany
   alias Bilimbi.People.Workforce.ReadResult
 
   @enforce_keys [:state, :platform_company_id, :workforce_company_id, :provider_id]
-  defstruct [:state, :platform_company_id, :workforce_company_id, :provider_id]
+  defstruct [
+    :state,
+    :platform_company_id,
+    :workforce_company_id,
+    :workforce_source_id,
+    :provider_id,
+    credential_stored?: false
+  ]
 
   @type t :: %__MODULE__{
-          state: :disconnected,
+          state: :disconnected | :disabled | :enabled,
           platform_company_id: pos_integer(),
           workforce_company_id: pos_integer(),
-          provider_id: String.t() | nil
+          workforce_source_id: String.t() | nil,
+          provider_id: String.t() | nil,
+          credential_stored?: boolean()
         }
 
   @doc "Rejects stale or unavailable People identity before using its company mapping."
@@ -25,6 +41,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Status do
            state: :disconnected,
            platform_company_id: company.platform_company_id,
            workforce_company_id: company.workforce_company_id,
+           workforce_source_id: company.reference.source_id,
            provider_id: nil
          }}
 

@@ -7,14 +7,20 @@
   namespace: Bilimbi.PeopleConnector.Connector,
   dependencies: [
     "base/authz",
+    "base/database",
+    "base/menu",
     "base/module_registry",
+    "base/settings",
     "base/tenancy",
     "base/ui",
     "core/company",
     "people/workforce"
   ],
-  migrations: nil,
+  migrations: "priv/repo/migrations",
+  migration_dispositions: %{20_260_930_200_101 => :bilimbi_only},
   web: "priv/web_routes.exs",
+  # Compatibility verification runs before pending Bilimbi-only migrations.
+  # Registering this fresh table would make adoption expect it already.
   schema_contract: nil,
   contribution_provider: Bilimbi.PeopleConnector.Connector.Contributions,
   dev_seed: nil
