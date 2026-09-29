@@ -35,32 +35,39 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
   end
 
   defp select_company(%{assigns: %{companies: []}} = socket, _company_id),
-    do: assign(socket, company: nil, connection_status: nil, freshness_notice: nil)
+    do: assign(socket, company: nil, connection_status: nil, workforce_notice: nil)
 
   defp select_company(%{assigns: %{companies: [first | _] = companies}} = socket, company_id) do
     company = Enum.find(companies, first, &(Integer.to_string(&1.id) == company_id))
 
     case Connector.status(socket.assigns.current_scope.scope, company.id) do
       {:ok, status} ->
-        assign(socket, company: company, connection_status: status, freshness_notice: nil)
+        assign(socket, company: company, connection_status: status, workforce_notice: nil)
 
       {:error, {:not_current, freshness}} ->
         assign(socket,
           company: company,
           connection_status: nil,
-          freshness_notice: freshness_notice(freshness)
+          workforce_notice: workforce_notice(freshness)
         )
 
       {:error, :not_found} ->
-        assign(socket, company: nil, connection_status: nil, freshness_notice: nil)
+        assign(socket,
+          company: company,
+          connection_status: nil,
+          workforce_notice: workforce_notice(:not_found)
+        )
     end
   end
 
-  defp freshness_notice({:stale, %DateTime{}}),
+  defp workforce_notice({:stale, %DateTime{}}),
     do: "Workforce identity is out of date. Connection information is unavailable."
 
-  defp freshness_notice({:unavailable, _reason}),
+  defp workforce_notice({:unavailable, _reason}),
     do: "Workforce identity is unavailable. Connection information cannot be shown."
+
+  defp workforce_notice(:not_found),
+    do: "This company has no workforce identity. Choose another company."
 
   @impl true
   def render(assigns) do
@@ -72,7 +79,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           <:subtitle>Workforce connection state for a company.</:subtitle>
         </.header>
 
-        <div :if={@company == nil} class="mt-5 rounded-xl border border-line bg-surface px-4 py-8">
+        <div :if={@companies == []} class="mt-5 rounded-xl border border-line bg-surface px-4 py-8">
           <.empty_state
             id="people-connections-no-company"
             title="No active company is available."
@@ -81,7 +88,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
         </div>
 
         <form
-          :if={@company}
+          :if={@companies != []}
           id="people-connections-company-form"
           phx-change="select_company"
           phx-submit="select_company"
@@ -109,11 +116,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           />
         </div>
 
-        <div :if={@freshness_notice} class="mt-5 rounded-xl border border-line bg-surface px-4 py-8">
+        <div :if={@workforce_notice} class="mt-5 rounded-xl border border-line bg-surface px-4 py-8">
           <.empty_state
             id="people-connections-workforce-unavailable"
             title="Workforce information is unavailable."
-            reason={@freshness_notice}
+            reason={@workforce_notice}
           />
         </div>
       </.page>
