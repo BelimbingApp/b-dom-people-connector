@@ -18,7 +18,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLiveTest do
     grant_capabilities!("people-connector.connections.view")
     {:ok, view, _html} = conn |> log_in_as() |> live(~p"/integrations/people/connections")
 
-    assert has_element?(view, "#people-connections-disconnected", "No workforce connection is configured.")
+    assert has_element?(
+             view,
+             "#people-connections-disconnected",
+             "No workforce connection is configured."
+           )
+
     refute has_element?(view, "#people-connections-page button")
   end
 
