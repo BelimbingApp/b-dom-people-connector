@@ -30,9 +30,7 @@ The module owns one fresh Bilimbi-only table, `people_connector_connections`
 (migration `20260930200101`, `:bilimbi_only`). A platform company has at most
 one connection, and one workforce company identity backs at most one platform
 company in a tenant; the database enforces both. No Belimbing table or data is
-adopted or imported. The owned `SchemaContract` describes the table, but the
-descriptor does not register it with compatibility verification, which runs
-before pending Bilimbi-only migrations.
+adopted or imported.
 
 A provider credential is the encrypted company-scoped Base Setting
 `people-connector.connection.credential`. It is not editable on the generic
