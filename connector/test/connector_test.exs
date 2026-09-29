@@ -9,10 +9,8 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
   alias Bilimbi.PeopleConnector.Connector
   alias Bilimbi.PeopleConnector.Connector.Capability
   alias Bilimbi.PeopleConnector.Connector.Provider
-  alias Bilimbi.PeopleConnector.Connector.ReadPort
   alias Bilimbi.PeopleConnector.Connector.Registry
   alias Bilimbi.PeopleConnector.Connector.Status
-  alias Bilimbi.PeopleConnector.Connector.WritePort
 
   setup do
     owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Repo, shared: true)
@@ -63,11 +61,11 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
     assert {:error, :not_found} = Status.from_workforce_result(ReadResult.current(nil))
   end
 
-  test "registered declarations refuse writes, other ports, unknown capabilities and all use while disconnected",
+  test "registered declarations refuse writes, unknown capabilities and all use while disconnected",
        %{
          scope: scope
        } do
-    {:ok, read} = Capability.new("employee_directory", :read, ReadPort)
+    {:ok, read} = Capability.new("employee_directory", :read)
     {:ok, provider} = Provider.new("people.native", "Native People", "1.0.0", [read])
     assert {:ok, registry} = Registry.register(Registry.new(), provider)
 
@@ -78,14 +76,12 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
                registry,
                "people.native",
                "employee_directory",
-               :read,
-               ReadPort
+               :read
              )
 
-    for {capability, direction, port} <- [
-          {"employee_directory", :write, WritePort},
-          {"employee_directory", :read, WritePort},
-          {"payroll", :read, ReadPort}
+    for {capability, direction} <- [
+          {"employee_directory", :write},
+          {"payroll", :read}
         ] do
       assert {:error, :unsupported} =
                Connector.request_port(
@@ -94,8 +90,7 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
                  registry,
                  "people.native",
                  capability,
-                 direction,
-                 port
+                 direction
                )
     end
 
@@ -106,8 +101,7 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
                registry,
                "missing",
                "employee_directory",
-               :read,
-               ReadPort
+               :read
              )
 
     assert {:error, :not_found} =
@@ -117,15 +111,14 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
                registry,
                "people.native",
                "employee_directory",
-               :read,
-               ReadPort
+               :read
              )
   end
 
   test "provider declarations reject duplicates, unknown keys and incompatible contracts" do
-    {:ok, read} = Capability.new("company_directory", :read, ReadPort)
-    assert {:error, :invalid_capability} = Capability.new("company_directory", :write, ReadPort)
-    assert {:error, :invalid_capability} = Capability.new("unknown", :read, ReadPort)
+    {:ok, read} = Capability.new("company_directory", :read)
+    assert {:error, :invalid_capability} = Capability.new("company_directory", :sync)
+    assert {:error, :invalid_capability} = Capability.new("unknown", :read)
     assert {:error, :invalid_provider} = Provider.new("people.native", "Native", "2.0.0", [read])
 
     assert {:error, :invalid_provider} =

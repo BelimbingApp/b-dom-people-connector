@@ -32,17 +32,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Registry do
 
   def register(%__MODULE__{}, _), do: {:error, :invalid_provider}
 
-  @spec permit(t(), String.t(), String.t(), :read | :write, module()) ::
-          :ok | {:error, :unsupported}
-  def permit(%__MODULE__{providers: providers}, provider_id, capability, direction, port) do
+  @spec permit(t(), String.t(), String.t(), :read | :write) :: :ok | {:error, :unsupported}
+  def permit(%__MODULE__{providers: providers}, provider_id, capability, direction) do
     case Map.get(providers, provider_id) do
       %Provider{capabilities: declarations} ->
-        if Enum.any?(
-             declarations,
-             &(&1.key == capability and &1.direction == direction and &1.port == port)
-           ),
-           do: :ok,
-           else: {:error, :unsupported}
+        if Enum.any?(declarations, &(&1.key == capability and &1.direction == direction)),
+          do: :ok,
+          else: {:error, :unsupported}
 
       nil ->
         {:error, :unsupported}

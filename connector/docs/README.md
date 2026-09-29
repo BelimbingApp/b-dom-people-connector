@@ -6,9 +6,9 @@ transport, active connection, or menu contribution.
 
 `Capability`, `Provider`, and `Registry` describe provider-declared read and
 write ports without activating any of them. Duplicate or invalid declarations
-are refused. `Connector.request_port/7` validates the platform company through
-People Workforce, then returns `:unsupported` for an undeclared capability,
-direction, or port; a declared port returns `:disconnected` until a later
+are refused. `Connector.request_port/6` validates the platform company through
+People Workforce, then returns `:unsupported` for an undeclared capability
+or direction; a declared port returns `:disconnected` until a later
 company-scoped connection contract exists. The read and write port behaviours
 are neutral placeholders for that later resolver, not callable provider access.
 

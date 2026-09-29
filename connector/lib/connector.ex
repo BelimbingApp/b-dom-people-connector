@@ -28,7 +28,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
   end
 
   @doc """
-  Checks a provider's declaration for a direction and port, then refuses use
+  Checks a provider's declaration for a direction, then refuses use
   while no company-scoped connection has been configured. An undeclared
   operation is refused even if an adapter implements the requested function.
   """
@@ -38,8 +38,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
           Registry.t(),
           String.t(),
           String.t(),
-          :read | :write,
-          module()
+          :read | :write
         ) :: {:error, refusal()}
   def request_port(
         %Scope{} = scope,
@@ -47,11 +46,10 @@ defmodule Bilimbi.PeopleConnector.Connector do
         %Registry{} = registry,
         provider_id,
         capability,
-        direction,
-        port
+        direction
       ) do
     with {:ok, _status} <- status(scope, platform_company_id),
-         :ok <- Registry.permit(registry, provider_id, capability, direction, port) do
+         :ok <- Registry.permit(registry, provider_id, capability, direction) do
       {:error, :disconnected}
     end
   end

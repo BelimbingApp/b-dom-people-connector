@@ -19,8 +19,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Provider do
       when is_binary(id) and is_binary(name) and is_binary(version) and is_list(capabilities) do
     declarations =
       Enum.map(capabilities, fn
-        %Capability{key: key, direction: direction, port: port} ->
-          Capability.new(key, direction, port)
+        %Capability{key: key, direction: direction} ->
+          Capability.new(key, direction)
 
         _ ->
           {:error, :invalid_capability}
