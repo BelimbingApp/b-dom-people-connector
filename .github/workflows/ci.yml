@@ -1,0 +1,176 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  ERL_COMPILER_OPTIONS: deterministic
+  MIX_ENV: test
+
+jobs:
+  composition:
+    name: ${{ matrix.topology }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        topology: [both, people_only, neither, connector_only]
+    env:
+      PGHOST: localhost
+      PGPASSWORD: bilimbi_dev_ca658ad7d8b5
+      PGPORT: "5432"
+      PGUSER: bilimbi
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: bilimbi_dev_ca658ad7d8b5
+          POSTGRES_USER: bilimbi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U bilimbi"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: bilimbi
+    steps:
+      - name: Check out Connector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: connector
+
+      - name: Read the pinned Bilimbi revision
+        id: pin
+        working-directory: .
+        run: echo "revision=$(tr -d '[:space:]' < connector/.github/bilimbi-revision)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Bilimbi
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BelimbingApp/bilimbi
+          ref: ${{ steps.pin.outputs.revision }}
+          path: bilimbi
+
+      - name: Check out People
+        if: matrix.topology == 'both' || matrix.topology == 'people_only'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: BelimbingApp/b-dom-people
+          ref: main
+          path: people
+
+      - name: Mount People
+        if: matrix.topology == 'both' || matrix.topology == 'people_only'
+        working-directory: .
+        run: mv people bilimbi/apps/domains/people
+
+      - name: Mount Connector
+        if: matrix.topology == 'both' || matrix.topology == 'connector_only'
+        working-directory: .
+        run: mv connector bilimbi/apps/domains/people_connector
+
+      - name: Verify topology
+        run: |
+          case '${{ matrix.topology }}' in
+            both) test -d apps/domains/people && test -d apps/domains/people_connector ;;
+            people_only) test -d apps/domains/people && test ! -e apps/domains/people_connector ;;
+            neither) test ! -e apps/domains/people && test ! -e apps/domains/people_connector ;;
+            connector_only) test ! -e apps/domains/people && test -d apps/domains/people_connector ;;
+          esac
+
+      - name: Read Bilimbi toolchain
+        id: tools
+        run: |
+          echo "otp=$(sed -n 's/^erlang = "\(.*\)"$/\1/p' .mise.toml)" >> "$GITHUB_OUTPUT"
+          echo "elixir=$(sed -n 's/^elixir = "\([^-\"]*\).*"$/\1/p' .mise.toml)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Erlang and Elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          otp-version: ${{ steps.tools.outputs.otp }}
+          elixir-version: ${{ steps.tools.outputs.elixir }}
+          version-type: strict
+
+      - name: Restore dependency cache
+        if: matrix.topology != 'connector_only'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: bilimbi/deps
+          key: ${{ runner.os }}-deps-${{ matrix.topology }}-${{ steps.pin.outputs.revision }}-${{ hashFiles('bilimbi/apps/domains/**/mix.exs') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-${{ matrix.topology }}-${{ steps.pin.outputs.revision }}-
+
+      - name: Require a clear missing People dependency
+        if: matrix.topology == 'connector_only'
+        run: |
+          set +e
+          output=$(mix compile 2>&1)
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo 'Connector composed without People' >&2
+            exit 1
+          fi
+          expected='module people_connector/connector declares missing dependency people/workforce'
+          if ! grep -qF "$expected" <<< "$output"; then
+            echo "$output"
+            echo "Expected: $expected" >&2
+            exit 1
+          fi
+          echo "$expected"
+
+      - name: Fetch dependencies
+        if: matrix.topology != 'connector_only'
+        run: |
+          if [ '${{ matrix.topology }}' = neither ]; then
+            mix deps.get --check-locked
+          else
+            mix deps.get
+            mix bilimbi.composition.lock --pin
+            BILIMBI_COMPOSITION_PINNED=1 mix deps.get --check-locked
+            BILIMBI_COMPOSITION_PINNED=1 mix deps.loadpaths
+          fi
+
+      - name: Compile and verify module graph
+        if: matrix.topology != 'connector_only'
+        run: |
+          mix compile.strict
+          elixir .github/scripts/graph_edges.exs
+          .github/scripts/mandates.sh
+
+      - name: Install Tailwind
+        if: matrix.topology != 'connector_only'
+        run: (cd apps/web && mix tailwind.install --if-missing)
+
+      - name: Install Node.js
+        if: matrix.topology != 'connector_only'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - name: Run Bilimbi precommit
+        if: matrix.topology != 'connector_only'
+        run: mix precommit
+
+      - name: Verify precommit made no changes
+        if: matrix.topology != 'connector_only'
+        run: |
+          git diff --exit-code
+          if [ -d apps/domains/people ]; then git -C apps/domains/people diff --exit-code; fi
+          if [ -d apps/domains/people_connector ]; then git -C apps/domains/people_connector diff --exit-code; fi
+          if [ '${{ matrix.topology }}' != neither ]; then mix bilimbi.composition.lock --check; fi
