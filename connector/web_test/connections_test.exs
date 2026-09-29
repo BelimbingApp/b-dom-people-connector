@@ -32,7 +32,13 @@ defmodule Bilimbi.PeopleConnector.Connector.ConnectionsTest do
     CompanyFixtures.insert_company!(%{id: 74, tenant_id: 41, code: "two", name: "Company B"})
     CompanyFixtures.insert_company!(%{id: 75, tenant_id: 42, code: "three", name: "Company C"})
     UserFixtures.insert_user!(%{id: 91, company_id: 73, name: "Operator"})
-    UserFixtures.insert_user!(%{id: 92, company_id: 73, name: "Viewer", email: "viewer@example.com"})
+
+    UserFixtures.insert_user!(%{
+      id: 92,
+      company_id: 73,
+      name: "Viewer",
+      email: "viewer@example.com"
+    })
 
     {:ok, system} = Tenancy.scope(41)
     operator = Authentication.sign_in(system, 91, 73)
@@ -80,7 +86,9 @@ defmodule Bilimbi.PeopleConnector.Connector.ConnectionsTest do
     grant_capabilities!(@manage)
     native = Providers.native_id()
 
-    assert {:error, :unauthorized} = Connector.configure_connection(operator, 74, registry, native)
+    assert {:error, :unauthorized} =
+             Connector.configure_connection(operator, 74, registry, native)
+
     assert {:error, :unauthorized} = Connector.set_enabled(operator, 74, registry, true)
     assert {:error, :unauthorized} = Connector.remove_connection(operator, 74)
     assert {:ok, %{state: :disconnected}} = Connector.status(operator, 74)
@@ -149,7 +157,10 @@ defmodule Bilimbi.PeopleConnector.Connector.ConnectionsTest do
     secret = "credential-#{System.unique_integer([:positive])}"
 
     assert {:error, :disconnected} = Connector.put_credential(operator, 73, registry, secret)
-    assert {:ok, _status} = Connector.configure_connection(operator, 73, registry, @secret_provider)
+
+    assert {:ok, _status} =
+             Connector.configure_connection(operator, 73, registry, @secret_provider)
+
     assert {:error, :credential_missing} = Connector.set_enabled(operator, 73, registry, true)
 
     for invalid <- ["", "   ", String.duplicate("x", 4097), 42] do
@@ -173,7 +184,14 @@ defmodule Bilimbi.PeopleConnector.Connector.ConnectionsTest do
     refute stored =~ secret
 
     assert {:error, :adapter_unavailable} =
-             Connector.request_port(operator, 73, registry, @secret_provider, "employee_directory", :read)
+             Connector.request_port(
+               operator,
+               73,
+               registry,
+               @secret_provider,
+               "employee_directory",
+               :read
+             )
 
     assert :ok = Connector.clear_credential(operator, 73, registry)
     assert {:ok, %{state: :disabled, credential_stored?: false}} = Connector.status(operator, 73)
@@ -185,16 +203,23 @@ defmodule Bilimbi.PeopleConnector.Connector.ConnectionsTest do
   } do
     grant_capabilities!(@manage)
 
-    assert {:ok, _status} = Connector.configure_connection(operator, 73, registry, @secret_provider)
+    assert {:ok, _status} =
+             Connector.configure_connection(operator, 73, registry, @secret_provider)
+
     assert :ok = Connector.put_credential(operator, 73, registry, "first-secret")
 
     assert {:ok, %{provider_id: "people.native", credential_stored?: false}} =
              Connector.configure_connection(operator, 73, registry, Providers.native_id())
 
-    assert {:ok, _status} = Connector.configure_connection(operator, 73, registry, @secret_provider)
+    assert {:ok, _status} =
+             Connector.configure_connection(operator, 73, registry, @secret_provider)
+
     assert :ok = Connector.put_credential(operator, 73, registry, "second-secret")
     assert :ok = Connector.remove_connection(operator, 73)
-    assert {:ok, %{state: :disconnected, credential_stored?: false}} = Connector.status(operator, 73)
+
+    assert {:ok, %{state: :disconnected, credential_stored?: false}} =
+             Connector.status(operator, 73)
+
     assert {:error, :disconnected} = Connector.remove_connection(operator, 73)
 
     assert %{rows: [[0]]} =
