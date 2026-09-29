@@ -1,6 +1,61 @@
 defmodule Bilimbi.PeopleConnector.Connector do
   @moduledoc """
-  Connector module boundary. Provider contracts and connection behavior will be
-  added in later slices; this scaffold exposes no operations or menu entries.
+  Provider-neutral Connector boundary.
+
+  Connection storage and activation belong to a later slice. A declared
+  capability is therefore still disconnected: no provider port can be used
+  through this facade yet. Tenant-owned calls take a validated Tenancy scope
+  and an explicit platform company ID. The People Workforce public API
+  validates that company and returns its separate workforce-company ID.
   """
+
+  alias Bilimbi.Base.Tenancy.Scope
+  alias Bilimbi.People.Workforce
+  alias Bilimbi.PeopleConnector.Connector.Registry
+  alias Bilimbi.PeopleConnector.Connector.Status
+
+  @type refusal :: :not_found | :unsupported | :disconnected
+
+  @doc "The company-scoped connection state before any connection is configured."
+  @spec status(Scope.t(), term()) :: {:ok, Status.t()} | {:error, :not_found}
+  def status(%Scope{} = scope, platform_company_id) do
+    with {:ok, company} <- Workforce.company(scope, platform_company_id) do
+      {:ok,
+       %Status{
+         state: :disconnected,
+         platform_company_id: company.platform_company_id,
+         workforce_company_id: company.workforce_company_id,
+         provider_id: nil
+       }}
+    end
+  end
+
+  @doc """
+  Checks a provider's declaration for a direction and port, then refuses use
+  while no company-scoped connection has been configured. An undeclared
+  operation is refused even if an adapter implements the requested function.
+  """
+  @spec request_port(
+          Scope.t(),
+          term(),
+          Registry.t(),
+          String.t(),
+          String.t(),
+          :read | :write,
+          module()
+        ) :: {:error, refusal()}
+  def request_port(
+        %Scope{} = scope,
+        platform_company_id,
+        %Registry{} = registry,
+        provider_id,
+        capability,
+        direction,
+        port
+      ) do
+    with {:ok, _status} <- status(scope, platform_company_id),
+         :ok <- Registry.permit(registry, provider_id, capability, direction, port) do
+      {:error, :disconnected}
+    end
+  end
 end

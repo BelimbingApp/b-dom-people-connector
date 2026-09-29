@@ -1,0 +1,52 @@
+defmodule Bilimbi.PeopleConnector.Connector.Provider do
+  @moduledoc "A provider descriptor with an immutable declaration set."
+
+  alias Bilimbi.PeopleConnector.Connector.Capability
+
+  @enforce_keys [:id, :name, :contract_version, :capabilities]
+  defstruct [:id, :name, :contract_version, :capabilities]
+
+  @type t :: %__MODULE__{
+          id: String.t(),
+          name: String.t(),
+          contract_version: String.t(),
+          capabilities: [Capability.t()]
+        }
+
+  @spec new(String.t(), String.t(), String.t(), [Capability.t()]) ::
+          {:ok, t()} | {:error, :invalid_provider}
+  def new(id, name, version, capabilities)
+      when is_binary(id) and is_binary(name) and is_binary(version) and is_list(capabilities) do
+    declarations =
+      Enum.map(capabilities, fn
+        %Capability{key: key, direction: direction, port: port} ->
+          Capability.new(key, direction, port)
+
+        _ ->
+          {:error, :invalid_capability}
+      end)
+
+    keys =
+      Enum.map(capabilities, fn
+        %Capability{key: key, direction: direction} -> {key, direction}
+        _ -> nil
+      end)
+
+    if Regex.match?(~r/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/, id) and
+         String.trim(name) != "" and Regex.match?(~r/^1\.\d+\.\d+$/, version) and
+         Enum.all?(declarations, &match?({:ok, _}, &1)) and
+         length(keys) == length(Enum.uniq(keys)) do
+      {:ok,
+       %__MODULE__{
+         id: id,
+         name: name,
+         contract_version: version,
+         capabilities: capabilities
+       }}
+    else
+      {:error, :invalid_provider}
+    end
+  end
+
+  def new(_, _, _, _), do: {:error, :invalid_provider}
+end
