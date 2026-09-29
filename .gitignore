@@ -1,0 +1,7 @@
+/_build
+/deps
+/cover
+/doc
+/.scratchpad
+/.elixir_ls
+erl_crash.dump
