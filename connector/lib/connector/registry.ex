@@ -20,7 +20,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Registry do
              provider.id,
              provider.name,
              provider.contract_version,
-             provider.capabilities
+             provider.capabilities,
+             provider.credential
            ),
          false <- Map.has_key?(registry.providers, provider.id) do
       {:ok, %__MODULE__{registry | providers: Map.put(registry.providers, provider.id, provider)}}
@@ -31,6 +32,18 @@ defmodule Bilimbi.PeopleConnector.Connector.Registry do
   end
 
   def register(%__MODULE__{}, _), do: {:error, :invalid_provider}
+
+  @spec fetch(t(), String.t()) :: {:ok, Provider.t()} | {:error, :unsupported}
+  def fetch(%__MODULE__{providers: providers}, provider_id) do
+    case Map.get(providers, provider_id) do
+      %Provider{} = provider -> {:ok, provider}
+      nil -> {:error, :unsupported}
+    end
+  end
+
+  @spec providers(t()) :: [Provider.t()]
+  def providers(%__MODULE__{providers: providers}),
+    do: providers |> Map.values() |> Enum.sort_by(&{&1.name, &1.id})
 
   @spec permit(t(), String.t(), String.t(), :read | :write) :: :ok | {:error, :unsupported}
   def permit(%__MODULE__{providers: providers}, provider_id, capability, direction) do

@@ -2,35 +2,178 @@ defmodule Bilimbi.PeopleConnector.Connector do
   @moduledoc """
   Provider-neutral Connector boundary.
 
-  Connection storage and activation belong to a later slice. A declared
-  capability is therefore still disconnected: no provider port can be used
-  through this facade yet. Tenant-owned calls take a validated Tenancy scope
-  and an explicit platform company ID. The People Workforce public API
-  validates that company and returns its separate workforce-company ID.
+  Tenant-owned calls take a validated Tenancy scope and an explicit platform
+  company ID (a Core Company in that tenant). The People Workforce public API
+  validates that company and returns its separate workforce-company identity;
+  a stored connection records both axes and is refused once they stop
+  matching the current Workforce mapping.
+
+  Reads need only the scope. Every write also needs the scope's signed-in
+  actor to hold `people-connector.connections.manage` with reach to the target
+  company, so a same-tenant sibling company needs tenant-wide company reach.
+  A provider credential is an encrypted company-scoped Base Setting; this
+  facade stores or clears it and reports only whether one exists.
+
+  No adapter serves provider ports yet: a declared port on an enabled
+  connection is refused with `:adapter_unavailable`.
   """
 
+  import Ecto.Query
+
+  alias Bilimbi.Base.Authz
+  alias Bilimbi.Base.Repo
+  alias Bilimbi.Base.Settings
+  alias Bilimbi.Base.Settings.Scope, as: SettingsScope
+  alias Bilimbi.Base.Tenancy
   alias Bilimbi.Base.Tenancy.Scope
+  alias Bilimbi.Core.Company
   alias Bilimbi.People.Workforce
   alias Bilimbi.People.Workforce.ReadResult
+  alias Bilimbi.PeopleConnector.Connector.Connection
+  alias Bilimbi.PeopleConnector.Connector.Provider
   alias Bilimbi.PeopleConnector.Connector.Registry
   alias Bilimbi.PeopleConnector.Connector.Status
 
-  @type refusal ::
-          :not_found | :unsupported | :disconnected | {:not_current, ReadResult.freshness()}
+  @manage_capability "people-connector.connections.manage"
+  @credential_key "people-connector.connection.credential"
+  @credential_max_bytes 4096
 
-  @doc "The company-scoped connection state before any connection is configured."
-  @spec status(Scope.t(), term()) ::
-          {:ok, Status.t()} | {:error, :not_found | {:not_current, ReadResult.freshness()}}
+  @type read_refusal ::
+          :not_found | :mapping_changed | {:not_current, ReadResult.freshness()}
+
+  @type write_refusal ::
+          read_refusal()
+          | :unauthorized
+          | :unsupported
+          | :disconnected
+          | :credential_not_required
+          | :credential_missing
+          | :invalid_credential
+          | :workforce_company_taken
+          | :conflict
+
+  @type refusal ::
+          read_refusal() | :unsupported | :disconnected | :adapter_unavailable
+
+  @doc "The capability every connection write requires."
+  @spec manage_capability() :: String.t()
+  def manage_capability, do: @manage_capability
+
+  @doc "The encrypted company-scoped setting that holds a provider credential."
+  @spec credential_key() :: String.t()
+  def credential_key, do: @credential_key
+
+  @doc """
+  The company's connection state. Stale or unavailable workforce identity,
+  and a stored mapping that no longer matches Workforce, are refused.
+  """
+  @spec status(Scope.t(), term()) :: {:ok, Status.t()} | {:error, read_refusal()}
   def status(%Scope{} = scope, platform_company_id) do
-    with {:ok, result} <- Workforce.company(scope, platform_company_id) do
-      Status.from_workforce_result(result)
+    with {:ok, current} <- workforce_status(scope, platform_company_id) do
+      case get_connection(scope, current.platform_company_id) do
+        nil -> {:ok, current}
+        %Connection{} = connection -> connected_status(current, connection)
+      end
     end
   end
 
   @doc """
-  Checks a provider's declaration for a direction, then refuses use
-  while no company-scoped connection has been configured. An undeclared
-  operation is refused even if an adapter implements the requested function.
+  Chooses the company's provider and records the current platform/workforce
+  company mapping. A new or changed provider starts disabled; changing
+  provider discards the previous provider's credential.
+  """
+  @spec configure_connection(Scope.t(), term(), Registry.t(), String.t()) ::
+          {:ok, Status.t()} | {:error, write_refusal()}
+  def configure_connection(
+        %Scope{} = scope,
+        platform_company_id,
+        %Registry{} = registry,
+        provider_id
+      ) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, %Provider{} = provider} <- Registry.fetch(registry, provider_id),
+         {:ok, current} <- workforce_status(scope, company_id),
+         {:ok, _connection} <- store_connection(scope, current, provider) do
+      status(scope, company_id)
+    end
+  end
+
+  @doc "Stores a secret for a connection whose provider declares one."
+  @spec put_credential(Scope.t(), term(), Registry.t(), term()) ::
+          :ok | {:error, write_refusal()}
+  def put_credential(%Scope{} = scope, platform_company_id, %Registry{} = registry, secret) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, connection, provider} <- connection_provider(scope, company_id, registry),
+         :ok <- require_secret_provider(provider),
+         :ok <- validate_secret(secret),
+         {:ok, _stored} <- Settings.put(@credential_key, secret, settings_scope(connection)) do
+      :ok
+    end
+  end
+
+  @doc "Clears the stored secret and disables a connection that needs one."
+  @spec clear_credential(Scope.t(), term(), Registry.t()) :: :ok | {:error, write_refusal()}
+  def clear_credential(%Scope{} = scope, platform_company_id, %Registry{} = registry) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, connection, provider} <- connection_provider(scope, company_id, registry),
+         :ok <- require_secret_provider(provider) do
+      transact(fn ->
+        :ok = Settings.delete(@credential_key, settings_scope(connection))
+
+        if connection.enabled,
+          do: connection |> Connection.changeset(%{enabled: false}) |> Repo.update(),
+          else: {:ok, connection}
+      end)
+      |> case do
+        {:ok, _connection} -> :ok
+        {:error, _reason} = error -> error
+      end
+    end
+  end
+
+  @doc """
+  Enables or disables a connection. Enabling requires a current company
+  mapping, an installed provider and, when the provider declares one, a
+  stored credential.
+  """
+  @spec set_enabled(Scope.t(), term(), Registry.t(), boolean()) ::
+          {:ok, Status.t()} | {:error, write_refusal()}
+  def set_enabled(%Scope{} = scope, platform_company_id, %Registry{} = registry, enabled)
+      when is_boolean(enabled) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, %Status{} = current} <- status(scope, company_id),
+         {:ok, connection, provider} <- connection_provider(scope, company_id, registry),
+         :ok <- require_credential(provider, current, enabled),
+         {:ok, _connection} <-
+           connection |> Connection.changeset(%{enabled: enabled}) |> Repo.update() do
+      status(scope, company_id)
+    end
+  end
+
+  @doc "Removes the company's connection and its stored credential."
+  @spec remove_connection(Scope.t(), term()) :: :ok | {:error, write_refusal()}
+  def remove_connection(%Scope{} = scope, platform_company_id) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         %Connection{} = connection <- get_connection(scope, company_id) do
+      transact(fn ->
+        :ok = Settings.delete(@credential_key, settings_scope(connection))
+        Repo.delete(connection)
+      end)
+      |> case do
+        {:ok, _connection} -> :ok
+        {:error, _reason} = error -> error
+      end
+    else
+      nil -> {:error, :disconnected}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  Checks a provider's declaration for a direction, then the company's
+  connection. An undeclared operation is refused even if an adapter
+  implements it. A declared port is `:disconnected` unless that provider's
+  connection is enabled, and `:adapter_unavailable` while no adapter serves it.
   """
   @spec request_port(
           Scope.t(),
@@ -48,9 +191,146 @@ defmodule Bilimbi.PeopleConnector.Connector do
         capability,
         direction
       ) do
-    with {:ok, _status} <- status(scope, platform_company_id),
+    with {:ok, status} <- status(scope, platform_company_id),
          :ok <- Registry.permit(registry, provider_id, capability, direction) do
-      {:error, :disconnected}
+      if status.state == :enabled and status.provider_id == provider_id,
+        do: {:error, :adapter_unavailable},
+        else: {:error, :disconnected}
     end
+  end
+
+  defp workforce_status(scope, platform_company_id) do
+    with {:ok, result} <- Workforce.company(scope, platform_company_id) do
+      Status.from_workforce_result(result)
+    end
+  end
+
+  defp connected_status(%Status{} = current, %Connection{} = connection) do
+    if connection.workforce_source_id == current.workforce_source_id and
+         connection.workforce_company_id == current.workforce_company_id do
+      {:ok,
+       %Status{
+         current
+         | state: if(connection.enabled, do: :enabled, else: :disabled),
+           provider_id: connection.provider_id,
+           credential_stored?: Settings.overridden?(@credential_key, settings_scope(connection))
+       }}
+    else
+      {:error, :mapping_changed}
+    end
+  end
+
+  defp store_connection(scope, %Status{} = current, %Provider{} = provider) do
+    mapping = %{
+      provider_id: provider.id,
+      provider_contract_version: provider.contract_version,
+      workforce_source_id: current.workforce_source_id,
+      workforce_company_id: current.workforce_company_id
+    }
+
+    transact(fn ->
+      case get_connection(scope, current.platform_company_id, lock: true) do
+        nil ->
+          %Connection{
+            tenant_id: Scope.tenant_id(scope),
+            platform_company_id: current.platform_company_id,
+            enabled: false
+          }
+          |> Connection.changeset(mapping)
+          |> Repo.insert()
+
+        %Connection{} = connection ->
+          provider_changed? = connection.provider_id != provider.id
+
+          remapped? =
+            connection.workforce_source_id != current.workforce_source_id or
+              connection.workforce_company_id != current.workforce_company_id
+
+          if provider_changed?,
+            do: :ok = Settings.delete(@credential_key, settings_scope(connection))
+
+          changes =
+            if provider_changed? or remapped?,
+              do: Map.put(mapping, :enabled, false),
+              else: mapping
+
+          connection |> Connection.changeset(changes) |> Repo.update()
+      end
+    end)
+    |> case do
+      {:ok, connection} -> {:ok, connection}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, constraint_refusal(changeset)}
+    end
+  end
+
+  defp constraint_refusal(%Ecto.Changeset{errors: errors}) do
+    if Keyword.has_key?(errors, :workforce_company_id),
+      do: :workforce_company_taken,
+      else: :conflict
+  end
+
+  defp connection_provider(scope, company_id, registry) do
+    with %Connection{} = connection <- get_connection(scope, company_id),
+         {:ok, provider} <- Registry.fetch(registry, connection.provider_id) do
+      {:ok, connection, provider}
+    else
+      nil -> {:error, :disconnected}
+      {:error, :unsupported} = error -> error
+    end
+  end
+
+  defp require_secret_provider(%Provider{credential: :secret}), do: :ok
+  defp require_secret_provider(%Provider{}), do: {:error, :credential_not_required}
+
+  defp require_credential(
+         %Provider{credential: :secret},
+         %Status{credential_stored?: false},
+         true
+       ),
+       do: {:error, :credential_missing}
+
+  defp require_credential(_provider, _status, _enabled), do: :ok
+
+  defp validate_secret(secret)
+       when is_binary(secret) and secret != "" and byte_size(secret) <= @credential_max_bytes do
+    if String.valid?(secret) and String.trim(secret) != "",
+      do: :ok,
+      else: {:error, :invalid_credential}
+  end
+
+  defp validate_secret(_secret), do: {:error, :invalid_credential}
+
+  defp authorize(scope, platform_company_id) do
+    with {:ok, actor} <- Authz.scope_actor(scope),
+         {:ok, company} <-
+           Company.authorize_company_target(actor, platform_company_id, @manage_capability) do
+      {:ok, company.id}
+    else
+      {:error, :no_authenticated_actor} -> {:error, :unauthorized}
+      {:error, :unauthorized} -> {:error, :unauthorized}
+      {:error, _not_found} -> {:error, :not_found}
+    end
+  end
+
+  defp get_connection(scope, platform_company_id, opts \\ []) do
+    query =
+      from(c in Tenancy.scope_query(Connection, scope),
+        where: c.platform_company_id == ^platform_company_id
+      )
+
+    query = if Keyword.get(opts, :lock, false), do: lock(query, "FOR UPDATE"), else: query
+    Repo.one(query)
+  end
+
+  defp settings_scope(%Connection{} = connection),
+    do: SettingsScope.company(connection.platform_company_id, connection.tenant_id)
+
+  defp transact(fun) do
+    Repo.transaction(fn ->
+      case fun.() do
+        {:ok, value} -> value
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
   end
 end
