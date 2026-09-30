@@ -8,14 +8,19 @@ defmodule Bilimbi.PeopleConnector.Connector do
   a stored connection records both axes and is refused once they stop
   matching the current Workforce mapping.
 
-  Reads need only the scope. Every write also needs the scope's signed-in
-  actor to hold `people-connector.connections.manage` with reach to the target
-  company, so a same-tenant sibling company needs tenant-wide company reach.
+  Reads follow People Workforce's read policy: each one first asks
+  `Workforce.company/2` for the company and is refused when Workforce refuses
+  it. Every write also needs the scope's signed-in actor to hold
+  `people-connector.connections.manage` with reach to the target company, so a
+  same-tenant sibling company needs tenant-wide company reach.
   A provider credential is an encrypted company-scoped Base Setting; this
   facade stores or clears it and reports only whether one exists.
 
-  No adapter serves provider ports yet: a declared port on an enabled
-  connection is refused with `:adapter_unavailable`.
+  `synchronise/6` reads an enabled connection's provider through a read-port
+  adapter into Connector-owned projections, with a checkpoint, durable
+  idempotency keys and reconciliation issues. `workforce/2` returns those
+  projections with their freshness. No adapter is installed yet, so
+  `request_port/6` and `synchronise/6` refuse with `:adapter_unavailable`.
   """
 
   import Ecto.Query
@@ -29,10 +34,14 @@ defmodule Bilimbi.PeopleConnector.Connector do
   alias Bilimbi.Core.Company
   alias Bilimbi.People.Workforce
   alias Bilimbi.People.Workforce.ReadResult
+  alias Bilimbi.PeopleConnector.Connector.Adapters
   alias Bilimbi.PeopleConnector.Connector.Connection
   alias Bilimbi.PeopleConnector.Connector.Provider
   alias Bilimbi.PeopleConnector.Connector.Registry
   alias Bilimbi.PeopleConnector.Connector.Status
+  alias Bilimbi.PeopleConnector.Connector.Sync
+  alias Bilimbi.PeopleConnector.Connector.SyncRun
+  alias Bilimbi.PeopleConnector.Connector.SyncSummary
 
   @manage_capability "people-connector.connections.manage"
   @credential_key "people-connector.connection.credential"
@@ -54,6 +63,13 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
   @type refusal ::
           read_refusal() | :unsupported | :disconnected | :adapter_unavailable
+
+  @type sync_refusal ::
+          refusal()
+          | :unauthorized
+          | :invalid_idempotency_key
+          | :sync_in_progress
+          | :conflict
 
   @doc "The capability every connection write requires."
   @spec manage_capability() :: String.t()
@@ -199,6 +215,100 @@ defmodule Bilimbi.PeopleConnector.Connector do
     end
   end
 
+  @doc """
+  Runs one synchronisation pass for the company's enabled connection.
+
+  Needs the manage capability, like every connection write. `idempotency_key`
+  names the request: asking again with the same key returns the recorded
+  run without reading the provider again. The first pass bootstraps; later
+  passes read changes after the checkpoint; `full: true` reads the whole
+  directory again and deactivates records the provider no longer lists. A
+  pass outcome that is not `:succeeded` is still `{:ok, run}`; see `SyncRun`
+  for the states.
+  """
+  @spec synchronise(Scope.t(), term(), Registry.t(), Adapters.t(), term(), keyword()) ::
+          {:ok, SyncRun.t()} | {:error, sync_refusal()}
+  def synchronise(
+        %Scope{} = scope,
+        platform_company_id,
+        %Registry{} = registry,
+        adapters,
+        idempotency_key,
+        opts \\ []
+      )
+      when is_map(adapters) and is_list(opts) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         :ok <- Sync.validate_key(idempotency_key),
+         {:ok, status} <- enabled_status(scope, company_id),
+         :ok <- Registry.permit(registry, status.provider_id, Sync.stream_capability(), :read),
+         {:ok, provider} <- Registry.fetch(registry, status.provider_id),
+         {:ok, adapter} <- fetch_adapter(adapters, provider.id) do
+      Sync.run(scope, status, provider, adapter, idempotency_key, opts)
+    end
+  end
+
+  @doc """
+  The company's checkpoint, last run, open issues and policy, under People
+  Workforce's read policy for the company.
+  """
+  @spec sync_summary(Scope.t(), term()) :: {:ok, SyncSummary.t()} | {:error, read_refusal()}
+  def sync_summary(%Scope{} = scope, platform_company_id) do
+    with {:ok, status} <- status(scope, platform_company_id) do
+      {:ok, Sync.summary(scope, status)}
+    end
+  end
+
+  @doc """
+  The company's active synchronised directory records as a People Workforce
+  `ReadResult`, under Workforce's read policy for the company: current, stale
+  past the maximum age, or unavailable when the connection is not enabled or
+  has never completed a pass.
+  """
+  @spec workforce(Scope.t(), term()) :: {:ok, ReadResult.t()} | {:error, read_refusal()}
+  def workforce(%Scope{} = scope, platform_company_id) do
+    with {:ok, status} <- status(scope, platform_company_id) do
+      {:ok, Sync.workforce(scope, status)}
+    end
+  end
+
+  @doc "Marks one of the company's open reconciliation issues resolved."
+  @spec resolve_issue(Scope.t(), term(), term()) :: :ok | {:error, write_refusal()}
+  def resolve_issue(%Scope{} = scope, platform_company_id, issue_id) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, status} <- status(scope, company_id) do
+      Sync.resolve_issue(scope, status, issue_id)
+    end
+  end
+
+  @doc """
+  Stores the company's synchronisation policy. `values` may hold
+  `:page_limit`, `:max_age_minutes` and `:run_timeout_minutes` integers within
+  `Sync.policy_fields/0` bounds; an out-of-range value changes nothing.
+  """
+  @spec put_sync_policy(Scope.t(), term(), map()) ::
+          {:ok, Sync.policy()} | {:error, write_refusal() | {:invalid_policy, atom()}}
+  def put_sync_policy(%Scope{} = scope, platform_company_id, values) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, _status} <- workforce_status(scope, company_id) do
+      Sync.put_policy(scope, company_id, values)
+    end
+  end
+
+  defp enabled_status(scope, company_id) do
+    case status(scope, company_id) do
+      {:ok, %Status{state: :enabled} = status} -> {:ok, status}
+      {:ok, %Status{}} -> {:error, :disconnected}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp fetch_adapter(adapters, provider_id) do
+    case Map.fetch(adapters, provider_id) do
+      {:ok, adapter} when is_atom(adapter) -> {:ok, adapter}
+      _ -> {:error, :adapter_unavailable}
+    end
+  end
+
   defp workforce_status(scope, platform_company_id) do
     with {:ok, result} <- Workforce.company(scope, platform_company_id) do
       Status.from_workforce_result(result)
@@ -248,6 +358,10 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
           if provider_changed?,
             do: :ok = Settings.delete(@credential_key, settings_scope(connection))
+
+          # Records synchronised from another provider or workforce company
+          # must not survive as this mapping's data.
+          if provider_changed? or remapped?, do: :ok = Sync.reset(connection)
 
           changes =
             if provider_changed? or remapped?,

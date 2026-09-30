@@ -1,21 +1,26 @@
 defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
   @moduledoc """
-  Company-scoped connection setup. Viewing needs
+  Company-scoped connection setup and synchronisation. Viewing needs
   `people-connector.connections.view`; every control also needs
   `people-connector.connections.manage` with reach to the selected company,
   which the Connector facade checks again on each write.
+
+  Each synchronise button carries an idempotency key minted for this page,
+  so a repeated click returns the recorded run instead of starting another.
   """
 
   use Bilimbi.Base.UI, :live_view
 
   alias Bilimbi.Core.Company
   alias Bilimbi.PeopleConnector.Connector
+  alias Bilimbi.PeopleConnector.Connector.Adapters
   alias Bilimbi.PeopleConnector.Connector.Providers
   alias Bilimbi.PeopleConnector.Connector.Registry
+  alias Bilimbi.PeopleConnector.Connector.Sync
 
   @view_capability "people-connector.connections.view"
   @credential_mask "••••••••"
-  @write_events ~w(configure set_enabled save_credential request_remove remove)
+  @write_events ~w(configure set_enabled save_credential request_remove remove synchronise resolve_issue save_policy)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -33,6 +38,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
      |> assign(:active_nav, nil)
      |> assign(:companies, companies)
      |> assign(:registry, registry)
+     |> assign(:adapters, Adapters.installed())
+     |> assign(:sync_key, new_sync_key())
+     |> assign(:policy_fields, policy_fields())
      |> assign(:providers, Registry.providers(registry))
      |> assign(:credential_mask, @credential_mask)
      |> assign(:pending_remove, false)}
@@ -96,6 +104,57 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
     end
   end
 
+  def handle_event("synchronise", %{"key" => key} = params, socket) do
+    socket = assign(socket, :sync_key, new_sync_key())
+    full? = Map.get(params, "full") == "true"
+
+    socket.assigns.current_scope.scope
+    |> Connector.synchronise(
+      socket.assigns.company.id,
+      socket.assigns.registry,
+      socket.assigns.adapters,
+      if(full?, do: key <> ":full", else: key),
+      full: full?
+    )
+    |> case do
+      {:ok, run} ->
+        {:noreply,
+         socket
+         |> select_company(Integer.to_string(socket.assigns.company.id))
+         |> put_flash(run_flash_kind(run.state), "Synchronisation: #{run_label(run.state)}.")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> select_company(Integer.to_string(socket.assigns.company.id))
+         |> put_flash(:error, sync_refusal_message(reason))}
+    end
+  end
+
+  def handle_event("resolve_issue", %{"id" => id}, socket) do
+    case Integer.parse(id) do
+      {issue_id, ""} ->
+        socket.assigns.current_scope.scope
+        |> Connector.resolve_issue(socket.assigns.company.id, issue_id)
+        |> after_write(socket, "Issue marked resolved.")
+
+      _ ->
+        after_write({:error, :not_found}, socket, nil)
+    end
+  end
+
+  def handle_event("save_policy", %{"policy" => params}, socket) do
+    case parse_policy(params) do
+      {:ok, values} ->
+        socket.assigns.current_scope.scope
+        |> Connector.put_sync_policy(socket.assigns.company.id, values)
+        |> after_write(socket, "Synchronisation policy saved.")
+
+      {:error, _reason} = error ->
+        after_write(error, socket, nil)
+    end
+  end
+
   def handle_event("request_remove", _params, socket),
     do: {:noreply, assign(socket, :pending_remove, true)}
 
@@ -134,7 +193,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
         workforce_notice: nil,
         remap?: false,
         can_manage?: false,
-        provider: nil
+        provider: nil,
+        sync: nil
       )
 
   defp select_company(%{assigns: %{companies: [first | _] = companies}} = socket, company_id) do
@@ -147,7 +207,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           connection_status: status,
           workforce_notice: nil,
           remap?: false,
-          provider: provider(socket.assigns.registry, status.provider_id)
+          provider: provider(socket.assigns.registry, status.provider_id),
+          sync: sync_summary(socket, company.id)
         )
 
       {:error, reason} ->
@@ -155,7 +216,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           connection_status: nil,
           workforce_notice: workforce_notice(reason),
           remap?: reason == :mapping_changed,
-          provider: nil
+          provider: nil,
+          sync: nil
         )
     end
   end
@@ -179,6 +241,114 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
       {:error, :unsupported} -> nil
     end
   end
+
+  defp sync_summary(socket, company_id) do
+    case Connector.sync_summary(socket.assigns.current_scope.scope, company_id) do
+      {:ok, summary} -> summary
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp new_sync_key, do: "page-" <> Ecto.UUID.generate()
+
+  defp policy_fields do
+    labels = %{
+      page_limit: {"Page size", "Most records the provider returns on one page."},
+      max_age_minutes:
+        {"Maximum age (minutes)", "After this long without a completed pass, records are stale."},
+      run_timeout_minutes:
+        {"Run timeout (minutes)", "A pass still running after this is recorded as unknown."}
+    }
+
+    for {field, {_key, min, max}} <- Sync.policy_fields() do
+      {label, hint} = Map.fetch!(labels, field)
+      %{field: field, name: Atom.to_string(field), label: label, hint: hint, min: min, max: max}
+    end
+  end
+
+  defp parse_policy(params) when is_map(params) do
+    Enum.reduce_while(Sync.policy_fields(), {:ok, %{}}, fn {field, _bounds}, {:ok, acc} ->
+      case Map.get(params, Atom.to_string(field)) do
+        nil ->
+          {:cont, {:ok, acc}}
+
+        value when is_binary(value) ->
+          case Integer.parse(String.trim(value)) do
+            {integer, ""} -> {:cont, {:ok, Map.put(acc, field, integer)}}
+            _ -> {:halt, {:error, {:invalid_policy, field}}}
+          end
+
+        _ ->
+          {:halt, {:error, {:invalid_policy, field}}}
+      end
+    end)
+  end
+
+  defp parse_policy(_params), do: {:error, {:invalid_policy, :values}}
+
+  defp sync_refusal_message(:adapter_unavailable),
+    do: "No adapter serves this provider yet, so it cannot be synchronised."
+
+  defp sync_refusal_message(:disconnected), do: "Enable the connection before synchronising."
+
+  defp sync_refusal_message(:sync_in_progress),
+    do: "A synchronisation is already running for this company. Try again when it finishes."
+
+  defp sync_refusal_message(reason), do: refusal_message(reason)
+
+  defp run_flash_kind(:succeeded), do: :success
+  defp run_flash_kind(_state), do: :error
+
+  defp run_label(:running), do: "running"
+  defp run_label(:succeeded), do: "succeeded"
+  defp run_label(:stale), do: "provider data was stale; nothing applied"
+  defp run_label(:unavailable), do: "provider unavailable; nothing applied"
+  defp run_label(:refused), do: "refused; the checkpoint did not move"
+  defp run_label(:failed), do: "failed; nothing applied"
+  defp run_label(:unknown), do: "outcome unknown; nothing counts as applied"
+
+  defp run_kind(:succeeded), do: :success
+  defp run_kind(:running), do: :neutral
+  defp run_kind(state) when state in [:stale, :unknown], do: :warning
+  defp run_kind(_state), do: :danger
+
+  defp freshness_label(:current), do: "Current"
+  defp freshness_label({:stale, _as_of}), do: "Stale"
+  defp freshness_label({:unavailable, :never_synchronised}), do: "Never synchronised"
+  defp freshness_label({:unavailable, _reason}), do: "Not enabled"
+
+  defp freshness_kind(:current), do: :success
+  defp freshness_kind({:stale, _as_of}), do: :warning
+  defp freshness_kind(_freshness), do: :neutral
+
+  defp issue_message(%{kind: "record_refused", reason: "foreign_source"}),
+    do: "A record came from a different source than this connection's."
+
+  defp issue_message(%{kind: "record_refused", reason: "other_company"}),
+    do: "A record belongs to a different workforce company."
+
+  defp issue_message(%{kind: "record_refused", reason: "undeclared_capability"}),
+    do: "The provider sent a kind of record it does not declare."
+
+  defp issue_message(%{kind: "record_refused", reason: "invalid_record"}),
+    do: "A record was incomplete or malformed."
+
+  defp issue_message(%{kind: "record_refused", reason: "unknown_reference"}),
+    do: "A deactivation named a record that was never synchronised."
+
+  defp issue_message(%{kind: "feed_refused"}),
+    do: "Every record in a pass was refused, so the checkpoint did not move."
+
+  defp issue_message(%{kind: "empty_bootstrap"}), do: "A full read returned no records."
+
+  defp issue_message(%{kind: "unknown_outcome"}),
+    do: "A pass stopped without recording an outcome. Nothing from it was applied."
+
+  defp issue_message(_issue), do: "The provider sent something that could not be applied."
+
+  defp issue_subject(%{record_kind: nil}), do: "—"
+  defp issue_subject(%{record_kind: kind, stable_id: nil}), do: kind
+  defp issue_subject(%{record_kind: kind, stable_id: stable_id}), do: "#{kind} #{stable_id}"
 
   defp workforce_notice({:not_current, {:stale, %DateTime{}}}),
     do: "Workforce identity is out of date. Connection information is unavailable."
@@ -216,6 +386,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   defp refusal_message(:conflict),
     do: "Someone else changed this connection. Review it and try again."
+
+  defp refusal_message(:not_found),
+    do: "That item is no longer available. Review the page and try again."
+
+  defp refusal_message({:invalid_policy, _field}),
+    do: "Enter whole numbers within the ranges shown."
 
   defp refusal_message(_reason),
     do: "Workforce identity is unavailable for this company. Try again later."
@@ -357,6 +533,15 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           </div>
         </section>
 
+        <.sync_section
+          :if={@sync && @connection_status && @connection_status.state != :disconnected}
+          sync={@sync}
+          can_manage?={@can_manage?}
+          enabled?={@connection_status.state == :enabled}
+          sync_key={@sync_key}
+          policy_fields={@policy_fields}
+        />
+
         <.confirm_dialog
           :if={@pending_remove}
           id="people-connections-remove-confirm"
@@ -364,8 +549,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           detail={
             if @connection_status && @connection_status.credential_stored?,
               do:
-                "Its stored credential is deleted. People records are not changed. You can connect again later.",
-              else: "People records are not changed. You can connect again later."
+                "Its stored credential and synchronised records are deleted. People records are not changed. You can connect again later.",
+              else:
+                "Its synchronised records are deleted. People records are not changed. You can connect again later."
           }
           confirm="Remove"
           working="Removing…"
@@ -420,6 +606,128 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
         {if @status && @status.state != :disconnected, do: "Save provider", else: "Connect"}
       </.button>
     </form>
+    """
+  end
+
+  attr(:sync, :any, required: true)
+  attr(:can_manage?, :boolean, required: true)
+  attr(:enabled?, :boolean, required: true)
+  attr(:sync_key, :string, required: true)
+  attr(:policy_fields, :list, required: true)
+
+  defp sync_section(assigns) do
+    ~H"""
+    <section id="people-connections-sync" class="mt-5 rounded-xl border border-line bg-surface p-5">
+      <.section_heading title="Synchronisation">
+        <:description>
+          Directory records read from the provider into this connection. People records are never changed.
+        </:description>
+      </.section_heading>
+
+      <.list id="people-connections-sync-facts">
+        <:item title="Freshness" id="people-connections-freshness">
+          <.badge kind={freshness_kind(@sync.freshness)}>{freshness_label(@sync.freshness)}</.badge>
+        </:item>
+        <:item title="Data as of" id="people-connections-as-of">
+          <.datetime :if={@sync.as_of_at} id="people-connections-as-of-value" value={@sync.as_of_at} />
+          <span :if={is_nil(@sync.as_of_at)}>No completed pass</span>
+        </:item>
+        <:item title="Last pass" id="people-connections-last-run">
+          <span :if={is_nil(@sync.last_run)}>None yet</span>
+          <span :if={@sync.last_run} class="flex flex-wrap items-center gap-2">
+            <.badge kind={run_kind(@sync.last_run.state)}>{run_label(@sync.last_run.state)}</.badge>
+            <span>
+              {if @sync.last_run.pass == :bootstrap, do: "Full read", else: "Changes"} ·
+              {@sync.last_run.applied} applied · {@sync.last_run.unchanged} unchanged ·
+              {@sync.last_run.deactivated} deactivated · {@sync.last_run.refused} refused
+            </span>
+          </span>
+        </:item>
+      </.list>
+
+      <div :if={@can_manage?} class="mt-5 flex flex-wrap gap-3">
+        <.button
+          id="people-connections-synchronise"
+          variant="primary"
+          disabled={not @enabled?}
+          phx-click="synchronise"
+          phx-value-key={@sync_key}
+          phx-disable-with="Synchronising…"
+        >
+          Synchronise now
+        </.button>
+        <.button
+          id="people-connections-full-read"
+          disabled={not @enabled?}
+          phx-click="synchronise"
+          phx-value-key={@sync_key}
+          phx-value-full="true"
+          phx-disable-with="Reading…"
+        >
+          Full read
+        </.button>
+      </div>
+
+      <div class="mt-5">
+        <.section_heading
+          id="people-connections-issues-heading"
+          title="Open issues"
+          count={length(@sync.open_issues)}
+        />
+        <.table
+          id="people-connections-issues"
+          rows={@sync.open_issues}
+          row_id={&"people-connections-issue-#{&1.id}"}
+          caption="Open reconciliation issues"
+        >
+          <:col :let={issue} label="Issue">
+            <.badge kind={if issue.severity == :error, do: :danger, else: :warning}>
+              {if issue.severity == :error, do: "Error", else: "Warning"}
+            </.badge>
+            {issue_message(issue)}
+          </:col>
+          <:col :let={issue} label="Record">{issue_subject(issue)}</:col>
+          <:col :let={issue} label="Seen" align={:right}>{issue.occurrences}</:col>
+          <:col :let={issue} label="Last seen">
+            <.datetime id={"people-connections-issue-#{issue.id}-seen"} value={issue.last_seen_at} />
+          </:col>
+          <:action :let={issue}>
+            <.button
+              :if={@can_manage?}
+              id={"people-connections-resolve-#{issue.id}"}
+              phx-click="resolve_issue"
+              phx-value-id={issue.id}
+            >
+              Mark resolved
+            </.button>
+          </:action>
+          <:empty :if={@sync.open_issues == []}>No open issues.</:empty>
+        </.table>
+      </div>
+
+      <form
+        :if={@can_manage?}
+        id="people-connections-policy-form"
+        phx-submit="save_policy"
+        class="mt-5 grid gap-x-4 sm:grid-cols-3"
+      >
+        <.input
+          :for={field <- @policy_fields}
+          id={"people-connections-policy-#{field.name}"}
+          name={"policy[#{field.name}]"}
+          type="number"
+          label={field.label}
+          hint={field.hint}
+          value={Map.fetch!(@sync.policy, field.field)}
+          min={field.min}
+          max={field.max}
+          required
+        />
+        <div class="sm:col-span-3">
+          <.button id="people-connections-save-policy" type="submit">Save policy</.button>
+        </div>
+      </form>
+    </section>
     """
   end
 end

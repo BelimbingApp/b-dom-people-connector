@@ -1,7 +1,8 @@
 # Connector
 
-`people_connector/connector` owns integration contracts and company
-connections. It requires the mounted `people/workforce` public module.
+`people_connector/connector` owns integration contracts, company
+connections, and directory synchronisation into Connector-owned projections.
+It requires the mounted `people/workforce` public module.
 
 `Capability`, `Provider`, and `Registry` describe provider-declared read and
 write ports. Duplicate or invalid declarations are refused. A provider also
@@ -26,11 +27,18 @@ identity.
 
 ## Storage
 
-The module owns one fresh Bilimbi-only table, `people_connector_connections`
-(migration `20260930200101`, `:bilimbi_only`). A platform company has at most
-one connection, and one workforce company identity backs at most one platform
-company in a tenant; the database enforces both. No Belimbing table or data is
-adopted or imported.
+The module owns fresh Bilimbi-only tables. `people_connector_connections`
+(migration `20260930200101`) holds connections: a platform company has at most
+one, and one workforce company identity backs at most one platform company in
+a tenant; the database enforces both. Migration `20260930220101` adds the
+synchronisation tables, each cascading from its connection:
+`people_connector_sync_checkpoints` (one per connection),
+`people_connector_sync_runs` (unique idempotency key per connection, at most
+one `running` row), `people_connector_workforce_records` (one row per
+connection, kind, provider source and stable ID) and
+`people_connector_reconciliation_issues` (unique issue key per connection).
+Both migrations are `:bilimbi_only`. No Belimbing table or data is adopted or
+imported.
 
 A provider credential is the encrypted company-scoped Base Setting
 `people-connector.connection.credential`. It is not editable on the generic
@@ -47,11 +55,68 @@ scope's signed-in actor to hold `people-connector.connections.manage` with
 Core Company reach to the target: the actor's own company, or a same-tenant
 sibling only with tenant-wide company reach. System work is refused.
 
+`synchronise/6`, `resolve_issue/3` and `put_sync_policy/3` need the same
+manage capability and reach. `sync_summary/2` and `workforce/2` follow People
+Workforce's read policy by delegating to `Workforce.company/2`: a company the
+scope's tenant cannot see, or one Workforce does not report as live and
+current, is refused before any synchronised record is read.
+
 `request_port/6` refuses an undeclared capability or direction with
 `:unsupported`, a declared port without an enabled connection to that
-provider with `:disconnected`, and an enabled one with `:adapter_unavailable`:
-no adapter serves ports yet. The read and write port behaviours are neutral
-placeholders for that later resolver.
+provider with `:disconnected`, and an enabled one with `:adapter_unavailable`.
+The write port behaviour is a neutral placeholder; no writer is activated.
+
+## Synchronisation
+
+An adapter implements `ReadPort.read/2`. It receives a `PortAuthorization`
+that only the Connector builds (both company axes, provider, capability) and a
+`PortRequest` (`:bootstrap` or `:changes`, the resume cursor, the page cursor
+and the page limit), and returns a `Page` of `WorkforceRecord` values plus, on
+a changes pass, `Deactivation` values. `Adapters.installed/0` maps provider
+IDs to adapter modules; it is empty until the native People adapter serves
+the native provider, so every pass is refused with `:adapter_unavailable`.
+Callers pass the adapter map explicitly, as they pass the provider registry.
+
+`synchronise/6` needs an enabled connection whose provider declares
+`employee_directory` reads, and a caller-chosen idempotency key (1-100
+letters, digits, `.`, `_`, `:` or `-`). The same key returns the recorded
+`SyncRun` without reading the provider. A second pass while one is running is
+refused with `:sync_in_progress`. The first pass is a bootstrap; later passes
+read changes after the checkpoint's resume cursor. `full: true` bootstraps
+again and deactivates records the provider no longer lists.
+
+The engine reads every page before applying any. A stale or unavailable page
+(Workforce freshness vocabulary), an adapter error or exception, a repeated
+page cursor, or a page over the limit or of the wrong shape ends the run
+`:stale`, `:unavailable` or `:failed` with nothing applied. Otherwise, in one
+transaction, it applies the pages and moves the checkpoint to the oldest page
+watermark, provided the run is still running, the connection is unchanged and
+the checkpoint has not moved. A pass that has not finished within the
+company's run timeout is marked `:unknown` by the next request, with an
+`unknown_outcome` issue; its late result is discarded. Reasons are fixed
+codes; adapter text is never stored.
+
+A provider cannot overwrite People business history. Synchronisation writes
+only Connector tables and holds directory facts only. A record from another
+source, for another workforce company, of an undeclared kind or malformed is
+refused as a `record_refused` issue and the pass continues; a refused record
+that names its identity counts as listed, so a full read does not deactivate
+it. If every record is refused the checkpoint stays put, nothing is
+deactivated and a `feed_refused` issue opens. An older observation never
+replaces a newer one, a repeated one writes nothing, and a
+deactivation keeps the row inactive rather than deleting it. Changing provider
+or workforce mapping deletes the projection and checkpoint so the next pass
+bootstraps; removing the connection deletes all of its synchronisation rows.
+Base Audit captures every table write.
+
+`workforce/2` returns active records as a People Workforce `ReadResult`:
+`:current`, `{:stale, as_of}` once the checkpoint is older than the company's
+maximum age, or `{:unavailable, :never_synchronised | :disconnected}`.
+
+Company-scoped Base Settings hold the policy, edited on the connections page:
+`people-connector.sync.page_limit` (1-1000, default 250),
+`people-connector.sync.max_age_minutes` (5-43200, default 1440) and
+`people-connector.sync.run_timeout_minutes` (1-1440, default 30).
 
 ## Page
 
@@ -59,6 +124,10 @@ placeholders for that later resolver.
 and lists only companies the actor can reach. It shows the connection state,
 provider, both company axes and whether a credential is stored. With the manage
 capability it offers provider choice, a masked credential field for providers
-that declare one, enable/disable, and removal behind a confirmation. The menu
+that declare one, enable/disable, and removal behind a confirmation. For a
+configured connection it shows freshness, the checkpoint watermark, the last
+pass and open issues. Managers also get **Synchronise now** and **Full read**
+(each carrying a page-minted idempotency key), **Mark resolved** per issue, and
+the policy form. The menu
 leaf **Administration › System › Integrations › People connections** carries
 the view capability; the route enforces it again.
