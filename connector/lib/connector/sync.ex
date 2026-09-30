@@ -20,8 +20,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   Every projection write is idempotent: a repeated or older observation
   changes nothing. A record the Connector refuses becomes a reconciliation
   issue and the pass continues. A completed bootstrap, or a pass whose every
-  page is a full snapshot, deactivates records the provider no longer lists. Rows are deactivated, never deleted, and only
-  Connector-owned tables are written.
+  page is a full snapshot, deactivates records the provider no longer lists.
+  Rows are deactivated, never deleted, and only Connector-owned tables are
+  written.
   """
 
   import Ecto.Query
