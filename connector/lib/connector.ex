@@ -260,8 +260,9 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
   @doc """
   The company's active synchronised directory records as a People Workforce
-  `ReadResult`, under Workforce's read policy for the company: current, stale past the maximum age, or unavailable when the
-  connection is not enabled or has never completed a pass.
+  `ReadResult`, under Workforce's read policy for the company: current, stale
+  past the maximum age, or unavailable when the connection is not enabled or
+  has never completed a pass.
   """
   @spec workforce(Scope.t(), term()) :: {:ok, ReadResult.t()} | {:error, read_refusal()}
   def workforce(%Scope{} = scope, platform_company_id) do

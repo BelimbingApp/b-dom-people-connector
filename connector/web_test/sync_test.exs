@@ -140,7 +140,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.SyncTest do
   } do
     grant_capabilities!(@manage)
     registry = connect_native!(operator)
-    assert {:ok, %{state: :succeeded}} = Connector.synchronise(operator, 73, registry, adapters, "k1")
+
+    assert {:ok, %{state: :succeeded}} =
+             Connector.synchronise(operator, 73, registry, adapters, "k1")
+
     assert count("people_connector_workforce_records") == 1
 
     {:ok, read} = Capability.new("employee_directory", :read)
