@@ -216,6 +216,7 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
              {"feed_refused", "every_record_refused"},
              {"record_refused", "foreign_source"},
              {"record_refused", "invalid_record"},
+             {"record_refused", "invalid_record"},
              {"record_refused", "other_company"},
              {"record_refused", "undeclared_capability"}
            ]
@@ -229,6 +230,7 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
 
     assert Enum.sort(issues(context.scope)) == [
              {"record_refused", "foreign_source"},
+             {"record_refused", "invalid_record"},
              {"record_refused", "invalid_record"},
              {"record_refused", "undeclared_capability"}
            ]
@@ -337,6 +339,24 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
     assert Enum.map(records(context.scope), & &1.stable_id) == ["1", "2"]
     assert {"feed_refused", "every_record_refused"} in issues(context.scope)
     assert {:ok, %{checkpoint_version: 1}} = Connector.sync_summary(context.scope, 73)
+  end
+
+  test "a listed record refused as invalid is not deactivated as absent", context do
+    serve_pages(%{nil => page([employee(1), employee(2)])})
+    assert {:ok, %{checkpoint_version: 1}} = sync(context, "boot")
+
+    serve_pages(%{
+      nil => page([employee(1), employee(2, %{name: " "})], %{as_of: ~U[2026-09-30 09:00:00Z]})
+    })
+
+    assert {:ok, run} = sync(context, "full", full: true)
+    assert {run.state, run.unchanged, run.refused, run.deactivated} == {:succeeded, 1, 1, 0}
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1", "2"]
+
+    {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+    assert [%{reason: "invalid_record", record_kind: "employee", stable_id: "2"}] =
+             summary.open_issues
   end
 
   test "a record a full read omitted comes back when it is listed again", context do

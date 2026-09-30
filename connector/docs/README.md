@@ -99,10 +99,11 @@ codes; adapter text is never stored.
 A provider cannot overwrite People business history. Synchronisation writes
 only Connector tables and holds directory facts only. A record from another
 source, for another workforce company, of an undeclared kind or malformed is
-refused as a `record_refused` issue and the pass continues; if every record is
-refused the checkpoint stays put, nothing is deactivated and a `feed_refused`
-issue opens. An older
-observation never replaces a newer one, a repeated one writes nothing, and a
+refused as a `record_refused` issue and the pass continues; a refused record
+that names its identity counts as listed, so a full read does not deactivate
+it. If every record is refused the checkpoint stays put, nothing is
+deactivated and a `feed_refused` issue opens. An older observation never
+replaces a newer one, a repeated one writes nothing, and a
 deactivation keeps the row inactive rather than deleting it. Changing provider
 or workforce mapping deletes the projection and checkpoint so the next pass
 bootstraps; removing the connection deletes all of its synchronisation rows.

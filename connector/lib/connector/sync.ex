@@ -543,7 +543,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   defp classify(%WorkforceRecord{} = record, connection, provider) do
     cond do
-      not WorkforceRecord.valid?(record) -> {:refuse, "invalid_record", nil}
+      not WorkforceRecord.valid?(record) -> {:refuse, "invalid_record", identity(record)}
       true -> classify_identity(record, record.workforce_company_id, connection, provider)
     end
   end
@@ -551,10 +551,19 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   defp classify(%Deactivation{} = change, connection, provider) do
     if Deactivation.valid?(change),
       do: classify_identity(change, connection.workforce_company_id, connection, provider),
-      else: {:refuse, "invalid_record", nil}
+      else: {:refuse, "invalid_record", identity(change)}
   end
 
   defp classify(_entry, _connection, _provider), do: {:refuse, "invalid_record", nil}
+
+  defp identity(%{kind: kind, source_id: source_id, stable_id: stable_id})
+       when kind in [:company, :employee] do
+    if WorkforceRecord.identifier?(source_id) and WorkforceRecord.identifier?(stable_id),
+      do: {kind, source_id, stable_id},
+      else: nil
+  end
+
+  defp identity(_entry), do: nil
 
   defp classify_identity(entry, workforce_company_id, connection, provider) do
     identity = {entry.kind, entry.source_id, entry.stable_id}
