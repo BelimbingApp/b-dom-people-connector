@@ -17,6 +17,37 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
             default: nil,
             nullable: true,
             encrypted: true
+          },
+          # Synchronisation policy, edited per company on the connections page.
+          "people-connector.sync.page_limit" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 250,
+            minimum: 1,
+            maximum: 1000,
+            label: "Synchronisation page size",
+            help: "Most directory records the provider returns on one page.",
+            capability: "people-connector.connections.manage"
+          },
+          "people-connector.sync.max_age_minutes" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 1440,
+            minimum: 5,
+            maximum: 43_200,
+            label: "Synchronised data maximum age",
+            help: "Minutes after the last completed pass before synchronised records are stale.",
+            capability: "people-connector.connections.manage"
+          },
+          "people-connector.sync.run_timeout_minutes" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 30,
+            minimum: 1,
+            maximum: 1440,
+            label: "Synchronisation run timeout",
+            help: "Minutes a pass may run before its outcome is recorded as unknown.",
+            capability: "people-connector.connections.manage"
           }
         },
         runtime_claims: []

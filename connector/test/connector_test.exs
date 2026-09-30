@@ -41,7 +41,7 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
     SettingsFixtures.create_settings_table!()
     ConnectorFixtures.create_connection_tables!()
     CompanyFixtures.insert_tenant!(%{id: 41})
-    CompanyFixtures.insert_tenant!(%{id: 42})
+    CompanyFixtures.insert_tenant!(%{id: 42, is_platform_operator: false})
     CompanyFixtures.insert_company!(%{id: 73, tenant_id: 41, code: "one"})
     CompanyFixtures.insert_company!(%{id: 74, tenant_id: 41, code: "two"})
     CompanyFixtures.insert_company!(%{id: 75, tenant_id: 42, code: "three"})

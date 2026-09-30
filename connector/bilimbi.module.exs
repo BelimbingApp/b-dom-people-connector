@@ -17,10 +17,13 @@
     "people/workforce"
   ],
   migrations: "priv/repo/migrations",
-  migration_dispositions: %{20_260_930_200_101 => :bilimbi_only},
+  migration_dispositions: %{
+    20_260_930_200_101 => :bilimbi_only,
+    20_260_930_220_101 => :bilimbi_only
+  },
   web: "priv/web_routes.exs",
   # Compatibility verification runs before pending Bilimbi-only migrations.
-  # Registering this fresh table would make adoption expect it already.
+  # Registering these fresh tables would make adoption expect them already.
   schema_contract: nil,
   contribution_provider: Bilimbi.PeopleConnector.Connector.Contributions,
   dev_seed: nil
