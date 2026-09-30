@@ -175,7 +175,7 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
     assert Enum.all?(pages, &(length(&1.entries) <= 2))
   end
 
-  test "a changes pass returns the same snapshot; leavers wait for a full read", %{scope: scope} do
+  test "a changes pass returns the same full snapshot", %{scope: scope} do
     employee!(scope, 73, "E-1")
 
     {:ok, boot} = NativePeopleAdapter.read(authorization(scope), request())
@@ -188,6 +188,8 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
 
     assert Enum.map(changes.entries, &{&1.kind, &1.stable_id}) ==
              Enum.map(boot.entries, &{&1.kind, &1.stable_id})
+
+    assert boot.snapshot and changes.snapshot
 
     refute Enum.any?(
              changes.entries,
@@ -288,7 +290,7 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
       assert {:ok, ^run} = sync(context, "boot")
     end
 
-    test "a full read deactivates a leaver and paging across small limits works", context do
+    test "a default sync deactivates a leaver and paging across small limits works", context do
       %{scope: scope} = context
       keep = employee!(scope, 73, "E-1")
       leaver = employee!(scope, 73, "E-2")
@@ -299,10 +301,9 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
 
       {:ok, _} = Employee.update_employee(scope, 73, leaver.id, %{status: "terminated"})
       assert {:ok, incremental} = sync(context, "inc")
-      assert incremental.deactivated == 0
 
-      assert {:ok, full} = sync(context, "full", full: true)
-      assert {full.state, full.deactivated} == {:succeeded, 1}
+      assert {incremental.state, incremental.pass, incremental.deactivated} ==
+               {:succeeded, :incremental, 1}
 
       {:ok, %ReadResult{value: records}} = Connector.workforce(scope, 73)
       ids = records |> Enum.filter(&(&1.kind == :employee)) |> Enum.map(& &1.stable_id)

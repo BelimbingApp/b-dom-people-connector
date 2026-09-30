@@ -11,8 +11,8 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapter do
   does not map to the authorized platform company.
 
   People has no change feed, so a `:changes` pass returns the same full
-  snapshot as a `:bootstrap` pass. Leavers are deactivated by the next
-  bootstrap (`full: true`), not by a changes pass.
+  snapshot as a `:bootstrap` pass and every page is marked `snapshot: true`;
+  the Connector then deactivates leavers on any pass.
 
   Every page of one pass shares the watermark minted on its first page, which
   rides in the page cursor; the cursor also records the last key emitted
@@ -94,7 +94,8 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapter do
          entries: Enum.map(taken, &elem(&1, 1)),
          next_cursor: next_cursor,
          resume_cursor: DateTime.to_iso8601(as_of),
-         as_of: as_of
+         as_of: as_of,
+         snapshot: true
        }}
     else
       {:error, :mapping_mismatch}

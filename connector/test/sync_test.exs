@@ -322,6 +322,32 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
     assert {"empty_bootstrap", "no_records"} in issues(context.scope)
   end
 
+  test "a changes pass deactivates absent records only when every page is a snapshot",
+       context do
+    serve_pages(%{nil => page([employee(1), employee(2), employee(3)])})
+    assert {:ok, %{pass: :bootstrap}} = sync(context, "boot")
+
+    serve_pages(%{nil => page([employee(1), employee(2)])})
+    assert {:ok, run} = sync(context, "changes")
+    assert {run.pass, run.deactivated} == {:incremental, 0}
+
+    serve_pages(%{
+      nil => page([employee(1)], %{snapshot: true, next_cursor: "p2"}),
+      "p2" => page([], %{snapshot: false})
+    })
+
+    assert {:ok, %{deactivated: 0}} = sync(context, "mixed")
+
+    serve_pages(%{
+      nil => page([employee(1)], %{snapshot: true, next_cursor: "p2"}),
+      "p2" => page([], %{snapshot: true})
+    })
+
+    assert {:ok, run} = sync(context, "snapshot")
+    assert {run.state, run.pass, run.deactivated} == {:succeeded, :incremental, 2}
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1"]
+  end
+
   test "a full read whose records are all refused deactivates nothing", context do
     serve_pages(%{nil => page([employee(1), employee(2)])})
     assert {:ok, %{checkpoint_version: 1}} = sync(context, "boot")

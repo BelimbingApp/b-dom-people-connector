@@ -87,7 +87,9 @@ letters, digits, `.`, `_`, `:` or `-`). The same key returns the recorded
 `SyncRun` without reading the provider. A second pass while one is running is
 refused with `:sync_in_progress`. The first pass is a bootstrap; later passes
 read changes after the checkpoint's resume cursor. `full: true` bootstraps
-again and deactivates records the provider no longer lists.
+again and deactivates records the provider no longer lists. A provider without
+a change feed marks each page `snapshot: true`; when every page of a pass is a
+snapshot, a changes pass also deactivates records it no longer lists.
 
 The engine reads every page before applying any. A stale or unavailable page
 (Workforce freshness vocabulary), an adapter error or exception, a repeated

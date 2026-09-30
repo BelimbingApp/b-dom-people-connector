@@ -45,6 +45,6 @@ page of a pass shares one watermark, minted on the first page and carried in the
 page cursor together with the last key emitted (the company is key 0, an
 employee its native ID). Pages are therefore stable while the workforce changes
 during a pass. A `:changes` pass returns the same full snapshot as a
-`:bootstrap` pass; an employee who has left is deactivated by the next
-`full: true` synchronisation, not by a changes pass. Each page rereads
+`:bootstrap` pass, and every page is marked `snapshot: true`, so any
+synchronisation deactivates an employee who has left. Each page rereads
 Workforce, so a pass over many pages costs one read per page.

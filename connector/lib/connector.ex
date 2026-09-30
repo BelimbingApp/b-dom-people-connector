@@ -224,7 +224,8 @@ defmodule Bilimbi.PeopleConnector.Connector do
   names the request: asking again with the same key returns the recorded
   run without reading the provider again. The first pass bootstraps; later
   passes read changes after the checkpoint; `full: true` reads the whole
-  directory again and deactivates records the provider no longer lists. A
+  directory again and deactivates records the provider no longer lists, as
+  does a changes pass whose provider returns a full snapshot. A
   pass outcome that is not `:succeeded` is still `{:ok, run}`; see `SyncRun`
   for the states.
   """
