@@ -19,8 +19,9 @@ defmodule Bilimbi.PeopleConnector.Connector do
   `synchronise/6` reads an enabled connection's provider through a read-port
   adapter into Connector-owned projections, with a checkpoint, durable
   idempotency keys and reconciliation issues. `workforce/2` returns those
-  projections with their freshness. No adapter is installed yet, so
-  `request_port/6` and `synchronise/6` refuse with `:adapter_unavailable`.
+  projections with their freshness. A mounted adapter registers itself in
+  `Adapters`; with none, `synchronise/6` refuses with `:adapter_unavailable`.
+  `request_port/6` only checks the gates and never hands out an adapter.
   """
 
   import Ecto.Query
@@ -189,7 +190,8 @@ defmodule Bilimbi.PeopleConnector.Connector do
   Checks a provider's declaration for a direction, then the company's
   connection. An undeclared operation is refused even if an adapter
   implements it. A declared port is `:disconnected` unless that provider's
-  connection is enabled, and `:adapter_unavailable` while no adapter serves it.
+  connection is enabled, and `:adapter_unavailable` otherwise: reads are served
+  only through `synchronise/6`, never by handing out an adapter.
   """
   @spec request_port(
           Scope.t(),

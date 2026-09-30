@@ -63,7 +63,8 @@ current, is refused before any synchronised record is read.
 
 `request_port/6` refuses an undeclared capability or direction with
 `:unsupported`, a declared port without an enabled connection to that
-provider with `:disconnected`, and an enabled one with `:adapter_unavailable`.
+provider with `:disconnected`, and an enabled one with `:adapter_unavailable`:
+it never hands out an adapter, and reads are served only by `synchronise/6`.
 The write port behaviour is a neutral placeholder; no writer is activated.
 
 ## Synchronisation
@@ -73,9 +74,12 @@ that only the Connector builds (both company axes, provider, capability) and a
 `PortRequest` (`:bootstrap` or `:changes`, the resume cursor, the page cursor
 and the page limit), and returns a `Page` of `WorkforceRecord` values plus, on
 a changes pass, `Deactivation` values. `Adapters.installed/0` maps provider
-IDs to adapter modules; it is empty until the native People adapter serves
-the native provider, so every pass is refused with `:adapter_unavailable`.
-Callers pass the adapter map explicitly, as they pass the provider registry.
+IDs to adapter modules. A mounted adapter module (the Connector cannot depend
+on it) calls `Adapters.register/2` when its application starts and
+`Adapters.unregister/2` when it stops; without one, every pass is refused with
+`:adapter_unavailable`. `people_connector/native_people_adapter` registers the
+native provider. Callers pass the adapter map explicitly, as they pass the
+provider registry.
 
 `synchronise/6` needs an enabled connection whose provider declares
 `employee_directory` reads, and a caller-chosen idempotency key (1-100

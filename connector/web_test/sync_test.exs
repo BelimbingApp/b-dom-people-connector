@@ -16,6 +16,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.SyncTest do
   alias Bilimbi.Core.User.TestFixtures, as: UserFixtures
   alias Bilimbi.People.Workforce.ReadResult
   alias Bilimbi.PeopleConnector.Connector
+  alias Bilimbi.PeopleConnector.Connector.Adapters
   alias Bilimbi.PeopleConnector.Connector.Capability
   alias Bilimbi.PeopleConnector.Connector.Page
   alias Bilimbi.PeopleConnector.Connector.Provider
@@ -31,6 +32,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.SyncTest do
   @manage "people-connector.connections.manage"
 
   setup do
+    # A mounted adapter registers itself; these tests choose their own.
+    installed = Adapters.installed()
+    for {provider_id, module} <- installed, do: Adapters.unregister(provider_id, module)
+
+    on_exit(fn ->
+      for {provider_id, module} <- installed, do: Adapters.register(provider_id, module)
+    end)
+
     UserFixtures.create_user_tables!()
     ConnectorFixtures.create_connection_tables!()
     CompanyFixtures.insert_tenant!(%{id: 41})
