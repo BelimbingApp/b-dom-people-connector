@@ -19,9 +19,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   Every projection write is idempotent: a repeated or older observation
   changes nothing. A record the Connector refuses becomes a reconciliation
-  issue and the pass continues. A completed bootstrap deactivates records the
-  provider no longer lists. Rows are deactivated, never deleted, and only
-  Connector-owned tables are written.
+  issue and the pass continues. A completed bootstrap, or a pass whose every
+  page is a full snapshot, deactivates records the provider no longer lists.
+  Rows are deactivated, never deleted, and only Connector-owned tables are
+  written.
   """
 
   import Ecto.Query
@@ -349,7 +350,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       limit: limit
     }
 
-    read_pages(adapter, authorization, request, %{pages: [], as_of: nil, seen: MapSet.new()})
+    read_pages(adapter, authorization, request, %{
+      pages: [],
+      as_of: nil,
+      seen: MapSet.new(),
+      snapshot: true
+    })
   end
 
   defp read_pages(adapter, authorization, request, acc) do
@@ -360,13 +366,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         acc
         | pages: [page.entries | acc.pages],
           as_of: earliest(acc.as_of, usec(page.as_of)),
-          seen: MapSet.put(acc.seen, request.cursor)
+          seen: MapSet.put(acc.seen, request.cursor),
+          snapshot: acc.snapshot and page.snapshot
       }
 
       cond do
         is_nil(page.next_cursor) ->
           entries = acc.pages |> Enum.reverse() |> Enum.concat()
-          {:complete, entries, acc.as_of, page.resume_cursor}
+          {:complete, entries, acc.as_of, page.resume_cursor, acc.snapshot}
 
         MapSet.member?(acc.seen, page.next_cursor) ->
           {:failed, "cursor_repeated"}
@@ -399,6 +406,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       is_list(page.entries) and length(page.entries) <= request.limit and
         match?(%DateTime{}, page.as_of) and cursor?(page.next_cursor) and
         cursor?(page.resume_cursor) and freshness?(page.freshness) and
+        is_boolean(page.snapshot) and
         (request.pass == :changes or not Enum.any?(page.entries, &match?(%Deactivation{}, &1)))
 
     if valid?, do: :ok, else: {:failed, "invalid_page"}
@@ -446,7 +454,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   defp record_outcome(_scope, run, _checkpoint, _provider, {:failed, reason}),
     do: close(run, :failed, reason, %{})
 
-  defp record_outcome(scope, run, checkpoint, provider, {:complete, entries, as_of, resume}) do
+  defp record_outcome(
+         scope,
+         run,
+         checkpoint,
+         provider,
+         {:complete, entries, as_of, resume, snapshot?}
+       ) do
     connection =
       Repo.one(
         from(c in Tenancy.scope_query(Connection, scope),
@@ -463,12 +477,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         close(run, :failed, "checkpoint_moved", %{as_of_at: as_of})
 
       true ->
-        apply_pass(connection, run, provider, entries, as_of, resume)
+        apply_pass(connection, run, provider, entries, as_of, resume, snapshot?)
     end
   end
 
-  defp apply_pass(connection, run, provider, entries, as_of, resume) do
+  defp apply_pass(connection, run, provider, entries, as_of, resume, snapshot?) do
     now = DateTime.utc_now()
+    full_read? = run.pass == :bootstrap or snapshot?
 
     projections =
       Repo.all(from(p in Projection, where: p.connection_id == ^connection.id))
@@ -481,7 +496,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
     tally = state.tally
 
-    if run.pass == :bootstrap and entries == [] do
+    if full_read? and entries == [] do
       report_issue(connection, "bootstrap:empty", now, %{
         kind: "empty_bootstrap",
         reason: "no_records",
@@ -500,7 +515,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       close(run, :refused, "every_record_refused", Map.put(tally, :as_of_at, as_of))
     else
       tally =
-        if run.pass == :bootstrap,
+        if full_read?,
           do: deactivate_absent(state, as_of).tally,
           else: tally
 

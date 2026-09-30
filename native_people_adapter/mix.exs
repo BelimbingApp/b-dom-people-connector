@@ -28,6 +28,7 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapter.MixProject do
 
   def application do
     [
+      mod: {Bilimbi.PeopleConnector.NativePeopleAdapter.Application, []},
       extra_applications: [:logger],
       env: Bilimbi.Base.ModuleRegistry.MixDiscovery.application_env(__DIR__)
     ]

@@ -5,7 +5,7 @@
   required: false,
   otp_app: :bilimbi_people_connector_native_people_adapter,
   namespace: Bilimbi.PeopleConnector.NativePeopleAdapter,
-  dependencies: ["people/workforce", "people_connector/connector"],
+  dependencies: ["base/tenancy", "people/workforce", "people_connector/connector"],
   migrations: nil,
   web: nil,
   schema_contract: nil,

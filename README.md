@@ -10,14 +10,14 @@ It does not build as a standalone Mix project.
 | Module | Descriptor ID | Future ownership |
 | --- | --- | --- |
 | [`connector/`](connector/docs/README.md) | `people_connector/connector` | integration contracts, company connections, synchronisation, projections and reconciliation |
-| [`native_people_adapter/`](native_people_adapter/docs/README.md) | `people_connector/native_people_adapter` | in-process People Workforce adapter |
+| [`native_people_adapter/`](native_people_adapter/docs/README.md) | `people_connector/native_people_adapter` | in-process People Workforce adapter (company and employee directory reads) |
 
 The Connector module has provider-neutral contracts, a capability registry,
 company connection storage with an operator page, and a synchronisation engine
 with checkpoints, idempotent runs, projections and reconciliation issues. Only
 the co-located native People provider can be chosen; it needs no credential.
-No adapter serves provider ports yet, so synchronisation is refused until the
-native adapter lands, and there is no transport. Its tables are fresh
+The native adapter serves the native provider's directory reads; without it
+mounted, synchronisation is refused, and there is no transport. Its tables are fresh
 Bilimbi-only schema. No legacy People users or data are being migrated.
 
 ## Mount

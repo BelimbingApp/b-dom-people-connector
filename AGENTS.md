@@ -27,3 +27,6 @@ copy. The [README](README.md) gives mount and CI instructions.
 - Run `mix precommit` from the mounted Bilimbi root. The pinned host revision
   is `.github/bilimbi-revision`; CI's topology matrix is
   `.github/workflows/ci.yml`. Do not commit a composition lock in this repo.
+- A Connector adapter registers itself with `Connector.Adapters.register/2` in
+  its application start; do not hard-code adapter modules in the Connector,
+  which cannot depend on them. See `native_people_adapter/docs/README.md`.
