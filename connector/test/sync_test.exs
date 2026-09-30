@@ -320,6 +320,39 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
     assert {"empty_bootstrap", "no_records"} in issues(context.scope)
   end
 
+  test "a full read whose records are all refused deactivates nothing", context do
+    serve_pages(%{nil => page([employee(1), employee(2)])})
+    assert {:ok, %{checkpoint_version: 1}} = sync(context, "boot")
+
+    serve_pages(%{
+      nil =>
+        page([employee(1, %{source_id: "elsewhere"}), employee(2, %{name: " "})], %{
+          as_of: ~U[2026-09-30 09:00:00Z]
+        })
+    })
+
+    assert {:ok, run} = sync(context, "refused", full: true)
+    assert {run.state, run.reason, run.deactivated} == {:refused, "every_record_refused", 0}
+    assert run.checkpoint_version == nil
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1", "2"]
+    assert {"feed_refused", "every_record_refused"} in issues(context.scope)
+    assert {:ok, %{checkpoint_version: 1}} = Connector.sync_summary(context.scope, 73)
+  end
+
+  test "a record a full read omitted comes back when it is listed again", context do
+    serve_pages(%{nil => page([employee(1), employee(2)])})
+    assert {:ok, %{checkpoint_version: 1}} = sync(context, "boot")
+
+    serve_pages(%{nil => page([employee(1)], %{as_of: ~U[2026-09-30 09:00:00Z]})})
+    assert {:ok, %{deactivated: 1}} = sync(context, "omit", full: true)
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1"]
+
+    serve_pages(%{nil => page([employee(1), employee(2)], %{as_of: ~U[2026-09-30 10:00:00Z]})})
+    assert {:ok, run} = sync(context, "relist", full: true)
+    assert {run.state, run.applied, run.unchanged, run.superseded} == {:succeeded, 1, 1, 0}
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1", "2"]
+  end
+
   test "freshness follows the company's maximum age and policy bounds are enforced", context do
     assert {:ok, %ReadResult{freshness: {:unavailable, :never_synchronised}}} =
              Connector.workforce(context.scope, 73)
@@ -360,5 +393,22 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
 
     assert {:ok, %{freshness: {:unavailable, :never_synchronised}}} =
              Connector.sync_summary(context.scope, 73)
+  end
+
+  test "synchronised records are refused where People Workforce refuses the company",
+       context do
+    serve_pages(%{nil => page([employee(1)])})
+    assert {:ok, %{state: :succeeded}} = sync(context, "boot")
+
+    CompanyFixtures.insert_tenant!(%{id: 42, is_platform_operator: false})
+    {:ok, other_scope} = Tenancy.scope(42)
+
+    assert {:error, :not_found} = Connector.workforce(other_scope, 73)
+    assert {:error, :not_found} = Connector.sync_summary(other_scope, 73)
+
+    SQL.query!(Repo, "UPDATE companies SET status = 'suspended' WHERE id = 73", [])
+
+    assert {:error, :not_found} = Connector.workforce(context.scope, 73)
+    assert {:error, :not_found} = Connector.sync_summary(context.scope, 73)
   end
 end

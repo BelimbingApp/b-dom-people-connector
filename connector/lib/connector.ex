@@ -8,9 +8,11 @@ defmodule Bilimbi.PeopleConnector.Connector do
   a stored connection records both axes and is refused once they stop
   matching the current Workforce mapping.
 
-  Reads need only the scope. Every write also needs the scope's signed-in
-  actor to hold `people-connector.connections.manage` with reach to the target
-  company, so a same-tenant sibling company needs tenant-wide company reach.
+  Reads follow People Workforce's read policy: each one first asks
+  `Workforce.company/2` for the company and is refused when Workforce refuses
+  it. Every write also needs the scope's signed-in actor to hold
+  `people-connector.connections.manage` with reach to the target company, so a
+  same-tenant sibling company needs tenant-wide company reach.
   A provider credential is an encrypted company-scoped Base Setting; this
   facade stores or clears it and reports only whether one exists.
 
@@ -245,7 +247,10 @@ defmodule Bilimbi.PeopleConnector.Connector do
     end
   end
 
-  @doc "The company's checkpoint, last run, open issues and policy. Needs only the scope."
+  @doc """
+  The company's checkpoint, last run, open issues and policy, under People
+  Workforce's read policy for the company.
+  """
   @spec sync_summary(Scope.t(), term()) :: {:ok, SyncSummary.t()} | {:error, read_refusal()}
   def sync_summary(%Scope{} = scope, platform_company_id) do
     with {:ok, status} <- status(scope, platform_company_id) do
@@ -255,7 +260,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
   @doc """
   The company's active synchronised directory records as a People Workforce
-  `ReadResult`: current, stale past the maximum age, or unavailable when the
+  `ReadResult`, under Workforce's read policy for the company: current, stale past the maximum age, or unavailable when the
   connection is not enabled or has never completed a pass.
   """
   @spec workforce(Scope.t(), term()) :: {:ok, ReadResult.t()} | {:error, read_refusal()}

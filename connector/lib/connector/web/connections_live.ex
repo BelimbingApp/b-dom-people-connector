@@ -106,14 +106,15 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   def handle_event("synchronise", %{"key" => key} = params, socket) do
     socket = assign(socket, :sync_key, new_sync_key())
+    full? = Map.get(params, "full") == "true"
 
     socket.assigns.current_scope.scope
     |> Connector.synchronise(
       socket.assigns.company.id,
       socket.assigns.registry,
       socket.assigns.adapters,
-      key,
-      full: Map.get(params, "full") == "true"
+      if(full?, do: key <> ":full", else: key),
+      full: full?
     )
     |> case do
       {:ok, run} ->

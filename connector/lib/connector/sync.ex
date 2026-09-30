@@ -479,11 +479,6 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     state =
       Enum.reduce(entries, state, &apply_entry(&1, &2, connection, provider, now))
 
-    state =
-      if run.pass == :bootstrap,
-        do: deactivate_absent(state, as_of),
-        else: state
-
     tally = state.tally
 
     if run.pass == :bootstrap and entries == [] do
@@ -504,6 +499,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
       close(run, :refused, "every_record_refused", Map.put(tally, :as_of_at, as_of))
     else
+      tally =
+        if run.pass == :bootstrap,
+          do: deactivate_absent(state, as_of).tally,
+          else: tally
+
       version = advance_checkpoint(connection, as_of, resume)
       resolve_key(connection, "feed:refused", now)
 
@@ -647,7 +647,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
             bump(state, :unchanged)
 
           true ->
-            projection = switch_off(current, change.observed_at)
+            projection = switch_off(current, change.observed_at, change.observed_at)
 
             %{state | projections: Map.put(state.projections, key, projection)}
             |> bump(:deactivated)
@@ -661,17 +661,17 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       projection.active and not MapSet.member?(state.seen, key)
     end)
     |> Enum.reduce(state, fn {key, projection}, state ->
-      observed_at =
+      deactivated_at =
         if DateTime.before?(projection.observed_at, as_of),
           do: as_of,
           else: projection.observed_at
 
-      projection = switch_off(projection, observed_at)
+      projection = switch_off(projection, projection.observed_at, deactivated_at)
       %{state | projections: Map.put(state.projections, key, projection)} |> bump(:deactivated)
     end)
   end
 
-  defp switch_off(projection, observed_at) do
+  defp switch_off(projection, observed_at, deactivated_at) do
     hash =
       content_hash(%{
         workforce_company_id: projection.workforce_company_id,
@@ -685,7 +685,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     projection
     |> Projection.changeset(%{
       active: false,
-      deactivated_at: observed_at,
+      deactivated_at: deactivated_at,
       observed_at: observed_at,
       content_hash: hash
     })
