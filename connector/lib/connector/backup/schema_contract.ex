@@ -52,7 +52,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup.SchemaContract do
         checks: %{
           "people_connector_backups_state" => %{
             expression:
-              "((((state)::text = ANY ((ARRAY['pending'::character varying, 'ready'::character varying, 'failed'::character varying])::text[])) AND (((state)::text <> 'ready'::text) OR (artifact_id IS NOT NULL))))"
+              "((((state)::text = ANY ((ARRAY['pending'::character varying, 'ready'::character varying, 'failed'::character varying, 'purged'::character varying])::text[])) AND (((state)::text <> ALL ((ARRAY['ready'::character varying, 'purged'::character varying])::text[])) OR (artifact_id IS NOT NULL))))"
           }
         }
       }

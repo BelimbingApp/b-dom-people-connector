@@ -27,7 +27,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.CreateBackups do
     create(
       constraint(:people_connector_backups, :people_connector_backups_state,
         check:
-          "state IN ('pending','ready','failed') AND (state <> 'ready' OR artifact_id IS NOT NULL)"
+          "state IN ('pending','ready','failed','purged') AND (state NOT IN ('ready','purged') OR artifact_id IS NOT NULL)"
       )
     )
   end

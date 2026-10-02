@@ -8,7 +8,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup.Record do
     field(:platform_company_id, :integer)
     field(:connection_id, :integer)
     field(:sha256, :string)
-    field(:state, Ecto.Enum, values: [:pending, :ready, :failed], default: :pending)
+    field(:state, Ecto.Enum, values: [:pending, :ready, :failed, :purged], default: :pending)
     field(:artifact_id, :binary_id)
     field(:expires_at, :utc_datetime_usec)
     field(:preview_token_hash, :string)

@@ -20,9 +20,10 @@ first. Backup retention and preview validity are company settings, editable
 inline on this page. Each backup captures its expiry at creation, capped by
 Base Artifacts' installation retention. Changing policy affects new backups.
 Expired backups cannot be previewed/restored. **Clean expired backups** deletes
-private bytes through Base Artifacts; receipts and audit remain. Cleanup is
-bounded by the installation artifact batch setting and reports failures for
-operator retry. Artifacts' generic cleanup also handles incomplete storage
+private bytes through Base Artifacts; receipts and audit remain, and a cleaned
+receipt keeps its artifact reference with the `purged` state. Each run takes the
+next batch, bounded by the installation artifact batch setting; failed deletes
+stay `ready` and are retried by the next run. Artifacts' generic cleanup also handles incomplete storage
 reservations.
 
 ## Guarded restore

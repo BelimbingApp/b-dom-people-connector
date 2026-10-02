@@ -248,16 +248,21 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
 
   def purge_expired(%Scope{} = scope, company) do
     with {:ok, company} <- Operations.authorize(scope, company) do
-      ids =
+      rows =
         query(scope, company)
-        |> where([r], r.expires_at <= ^DateTime.utc_now() and not is_nil(r.artifact_id))
-        |> order_by(:expires_at)
+        |> where([r], r.state == :ready and r.expires_at <= ^DateTime.utc_now())
+        |> order_by([:expires_at, :id])
         |> limit(^Settings.get("artifacts.purge_batch_size"))
         |> Repo.all()
 
       results =
-        Enum.map(ids, fn row ->
-          {row.id, Artifacts.delete(scope, company, Owner, row.artifact_id)}
+        Enum.map(rows, fn row ->
+          result = Artifacts.delete(scope, company, Owner, row.artifact_id)
+
+          if result == {:ok, :deleted},
+            do: row |> Ecto.Changeset.change(state: :purged) |> Repo.update!()
+
+          {row.id, result}
         end)
 
       {:ok,
@@ -596,7 +601,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
   defp present(row),
     do:
       Map.take(row, [:id, :artifact_id, :inserted_at, :expires_at, :restored_at])
-      |> Map.put(:state, if(live?(row), do: row.state, else: :expired))
+      |> Map.put(:state, if(row.state == :purged or live?(row), do: row.state, else: :expired))
 
   defp policy(scope, company),
     do:

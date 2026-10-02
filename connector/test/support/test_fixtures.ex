@@ -46,7 +46,8 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
         recovery_generation integer, restored_at timestamp(6),
         inserted_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL,
         CONSTRAINT people_connector_backups_state CHECK
-          (state IN ('pending','ready','failed') AND (state <> 'ready' OR artifact_id IS NOT NULL))
+          (state IN ('pending','ready','failed','purged') AND
+           (state NOT IN ('ready','purged') OR artifact_id IS NOT NULL))
       ) ON COMMIT PRESERVE ROWS
       """,
       []
