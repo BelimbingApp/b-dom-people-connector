@@ -18,6 +18,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup.Record do
     field(:preview_expires_at, :utc_datetime_usec)
     field(:recovery_generation, :integer)
     field(:restored_at, :utc_datetime_usec)
+    field(:purge_attempts, :integer, default: 0)
+    field(:purge_last_error, :string)
+    field(:purge_attempted_at, :utc_datetime_usec)
+    field(:purge_held_at, :utc_datetime_usec)
     timestamps(type: :utc_datetime_usec)
   end
 end

@@ -19,6 +19,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.CreateBackups do
       add(:preview_expires_at, :utc_datetime_usec)
       add(:recovery_generation, :integer)
       add(:restored_at, :utc_datetime_usec)
+      add(:purge_attempts, :integer, null: false)
+      add(:purge_last_error, :string, size: 255)
+      add(:purge_attempted_at, :utc_datetime_usec)
+      add(:purge_held_at, :utc_datetime_usec)
       timestamps(type: :utc_datetime_usec)
     end
 

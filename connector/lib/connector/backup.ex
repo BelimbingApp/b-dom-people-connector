@@ -32,7 +32,24 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
         |> limit(20)
         |> Repo.all()
 
-      {:ok, %{policy: policy(scope, company), records: Enum.map(rows, &present/1)}}
+      holds =
+        query(scope, company)
+        |> where([r], r.state == :ready and not is_nil(r.purge_held_at))
+        |> order_by([:purge_held_at, :id])
+        |> Repo.all()
+        |> Enum.map(
+          &Map.take(&1, [
+            :id,
+            :inserted_at,
+            :expires_at,
+            :purge_attempts,
+            :purge_last_error,
+            :purge_attempted_at,
+            :purge_held_at
+          ])
+        )
+
+      {:ok, %{policy: policy(scope, company), records: Enum.map(rows, &present/1), holds: holds}}
     end
   end
 
@@ -248,22 +265,18 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
 
   def purge_expired(%Scope{} = scope, company) do
     with {:ok, company} <- Operations.authorize(scope, company) do
+      now = DateTime.utc_now()
+      retry_before = DateTime.add(now, -Settings.get("artifacts.purge_retry_minutes"), :minute)
+
       rows =
         query(scope, company)
-        |> where([r], r.state == :ready and r.expires_at <= ^DateTime.utc_now())
+        |> where([r], r.state == :ready and r.expires_at <= ^now and is_nil(r.purge_held_at))
+        |> where([r], is_nil(r.purge_attempted_at) or r.purge_attempted_at <= ^retry_before)
         |> order_by([:expires_at, :id])
         |> limit(^Settings.get("artifacts.purge_batch_size"))
         |> Repo.all()
 
-      results =
-        Enum.map(rows, fn row ->
-          result = Artifacts.delete(scope, company, Owner, row.artifact_id)
-
-          if result == {:ok, :deleted},
-            do: row |> Ecto.Changeset.change(state: :purged) |> Repo.update!()
-
-          {row.id, result}
-        end)
+      results = Enum.map(rows, &{&1.id, purge(scope, company, &1)})
 
       {:ok,
        %{
@@ -271,6 +284,72 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
          errors: for({id, {:error, reason}} <- results, do: {id, reason})
        }}
     end
+  end
+
+  def retry_purge(%Scope{} = scope, company, id) do
+    with {:ok, company} <- Operations.authorize(scope, company),
+         {:ok, row} <-
+           Operations.transaction(fn ->
+             row = fetch!(scope, company, id, true)
+
+             unless row.state == :ready and row.purge_held_at,
+               do: Repo.rollback(:not_found)
+
+             Operations.audit!(scope, company, "people-connector.backup.purge_released", %{
+               backup_id: row.id,
+               attempts: row.purge_attempts
+             })
+
+             row
+             |> Ecto.Changeset.change(
+               purge_attempts: 0,
+               purge_last_error: nil,
+               purge_attempted_at: nil,
+               purge_held_at: nil
+             )
+             |> Repo.update!()
+           end) do
+      purge(scope, company, row)
+    end
+  end
+
+  defp purge(scope, company, row) do
+    case Artifacts.delete(scope, company, Owner, row.artifact_id) do
+      {:ok, :deleted} = deleted ->
+        row |> Ecto.Changeset.change(state: :purged) |> Repo.update!()
+        deleted
+
+      {:error, reason} = error ->
+        record_purge_failure(scope, company, row.id, reason)
+        error
+    end
+  end
+
+  defp record_purge_failure(scope, company, id, reason) do
+    error = if is_atom(reason), do: String.slice(Atom.to_string(reason), 0, 255), else: "error"
+    max_attempts = Settings.get("artifacts.purge_max_attempts")
+
+    Operations.transaction(fn ->
+      now = DateTime.utc_now()
+      row = fetch!(scope, company, id, true)
+      attempts = row.purge_attempts + 1
+      held_at = if attempts >= max_attempts, do: now
+
+      row
+      |> Ecto.Changeset.change(
+        purge_attempts: attempts,
+        purge_last_error: error,
+        purge_attempted_at: now,
+        purge_held_at: held_at
+      )
+      |> Repo.update!()
+
+      payload = %{backup_id: row.id, attempts: attempts, reason: error}
+      Operations.audit!(scope, company, "people-connector.backup.purge_failed", payload)
+
+      if held_at,
+        do: Operations.audit!(scope, company, "people-connector.backup.purge_held", payload)
+    end)
   end
 
   def authorize_artifact(%Scope{} = scope, company, :purge, nil) do

@@ -44,6 +44,8 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
         preview_token_hash varchar(64), preview_state_hash varchar(64),
         preview_actor_id bigint, preview_impersonator_id bigint, preview_expires_at timestamp(6),
         recovery_generation integer, restored_at timestamp(6),
+        purge_attempts integer NOT NULL, purge_last_error varchar(255),
+        purge_attempted_at timestamp(6), purge_held_at timestamp(6),
         inserted_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL,
         CONSTRAINT people_connector_backups_state CHECK
           (state IN ('pending','ready','failed','purged') AND

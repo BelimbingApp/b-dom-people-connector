@@ -27,6 +27,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
        company: nil,
        policy: nil,
        records: [],
+       holds: [],
        preview: nil,
        confirming: false
      )
@@ -135,6 +136,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
         "Expired backup cleanup completed."
       )
 
+  def handle_event("retry_purge", %{"id" => id}, socket),
+    do:
+      outcome(
+        socket,
+        Backup.retry_purge(scope(socket), company(socket), id),
+        "Held backup removed."
+      )
+
   def handle_event(_, _, socket), do: {:noreply, socket}
 
   defp outcome(socket, {:ok, %{errors: [_ | _]}}, _),
@@ -153,12 +162,16 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
   defp outcome(socket, {:error, reason}, _),
     do: {:noreply, socket |> refresh() |> put_flash(:error, message(reason))}
 
-  defp refresh(%{assigns: %{company: nil}} = socket), do: assign(socket, policy: nil, records: [])
+  defp refresh(%{assigns: %{company: nil}} = socket),
+    do: assign(socket, policy: nil, records: [], holds: [])
 
   defp refresh(socket) do
     case Backup.summary(scope(socket), company(socket)) do
-      {:ok, summary} -> assign(socket, policy: summary.policy, records: summary.records)
-      _ -> assign(socket, policy: nil, records: [])
+      {:ok, summary} ->
+        assign(socket, policy: summary.policy, records: summary.records, holds: summary.holds)
+
+      _ ->
+        assign(socket, policy: nil, records: [], holds: [])
     end
   end
 
@@ -200,6 +213,19 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
               <:empty :if={@records == []}>No backups created. Back up a configured native connection to begin.</:empty>
             </.table>
             <.button id="people-backups-purge" phx-click="purge" phx-disable-with="Cleaning…">Clean expired backups</.button>
+          </.card>
+          <.card :if={@holds != []} inner_class="p-5 sm:p-6">
+            <.section_heading title="Held cleanup" />
+            <.table id="people-backups-holds" rows={@holds} framed={false} caption="Expired backups whose cleanup is held">
+              <:col :let={row} label="Created"><.datetime id={"backup-hold-#{row.id}-created"} value={row.inserted_at} /></:col>
+              <:col :let={row} label="Attempts">{row.purge_attempts}</:col>
+              <:col :let={row} label="Reason">{row.purge_last_error}</:col>
+              <:col :let={row} label="Held"><.datetime id={"backup-hold-#{row.id}-held"} value={row.purge_held_at} /></:col>
+              <:action :let={row}>
+                <.button id={"retry-purge-#{row.id}"} phx-click="retry_purge" phx-value-id={row.id} phx-disable-with="Retrying…">Retry cleanup</.button>
+              </:action>
+            </.table>
+            <p class="text-sm text-muted mt-3">Cleanup stopped after repeated failures. Review private storage in Operator Settings, then retry.</p>
           </.card>
           <.card :if={@preview} inner_class="p-5 sm:p-6">
             <.section_heading title="Restore preview" />
@@ -259,6 +285,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
 
   defp message(:unauthorized),
     do: "Connection management permission is required for this company."
+
+  defp message(:cleanup_pending),
+    do: "Private storage could not remove the backup. Review private storage settings and retry."
 
   defp message(:restore_required), do: "Restore this backup before requesting recovery."
 

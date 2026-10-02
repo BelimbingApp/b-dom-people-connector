@@ -27,6 +27,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup.SchemaContract do
               {"preview_expires_at", {:timestamp, 6}, true},
               {"recovery_generation", :integer, true},
               {"restored_at", {:timestamp, 6}, true},
+              {"purge_attempts", :integer, false},
+              {"purge_last_error", {:varchar, 255}, true},
+              {"purge_attempted_at", {:timestamp, 6}, true},
+              {"purge_held_at", {:timestamp, 6}, true},
               {"inserted_at", {:timestamp, 6}, false},
               {"updated_at", {:timestamp, 6}, false}
             ],

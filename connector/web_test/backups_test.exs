@@ -168,38 +168,86 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     assert {:ok, %{deleted: [_], errors: []}} = Backup.purge_expired(c.operator, 73)
   end
 
-  test "cleanup advances past purged receipts in batches and retries failed deletes", c do
+  test "cleanup advances past purged receipts in batches", c do
     {:ok, _} = Settings.put("artifacts.purge_batch_size", 2)
-    backups = for _ <- 1..5, do: elem(Backup.create(c.operator, 73), 1)
-    [first | _] = backups
-    File.chmod!(c.root, 0o500)
+    backups = expired_backups!(c, 5)
 
-    SQL.query!(
-      Repo,
-      "UPDATE people_connector_backups SET expires_at = now() - interval '1 second'",
-      []
-    )
-
-    assert {:ok, %{deleted: [], errors: [_, _]}} = Backup.purge_expired(c.operator, 73)
-    File.chmod!(c.root, 0o700)
-
-    assert {:ok, %{deleted: purged, errors: []}} = Backup.purge_expired(c.operator, 73)
-    assert first.id in purged
+    assert {:ok, %{deleted: first, errors: []}} = Backup.purge_expired(c.operator, 73)
     assert {:ok, %{deleted: second, errors: []}} = Backup.purge_expired(c.operator, 73)
     assert {:ok, %{deleted: third, errors: []}} = Backup.purge_expired(c.operator, 73)
     assert {:ok, %{deleted: [], errors: []}} = Backup.purge_expired(c.operator, 73)
-
-    assert Enum.sort(purged ++ second ++ third) == Enum.sort(Enum.map(backups, & &1.id))
+    assert first ++ second ++ third == Enum.map(backups, & &1.id)
 
     for backup <- backups,
         do: refute(File.exists?(Path.join(c.root, backup.artifact_id)))
 
-    {:ok, %{records: records}} = Backup.summary(c.operator, 73)
+    {:ok, %{records: records, holds: []}} = Backup.summary(c.operator, 73)
 
     assert Enum.sort(Enum.map(records, &{&1.id, &1.artifact_id, &1.state})) ==
              Enum.sort(Enum.map(backups, &{&1.id, &1.artifact_id, :purged}))
 
-    assert {:error, :invalid_backup} = Backup.preview(c.operator, 73, first.id)
+    assert {:error, :invalid_backup} = Backup.preview(c.operator, 73, hd(backups).id)
+  end
+
+  test "persistently failing oldest backups are deferred, then held, and do not block newer ones",
+       c do
+    {:ok, _} = Settings.put("artifacts.purge_batch_size", 2)
+    {:ok, _} = Settings.put("artifacts.purge_max_attempts", 2)
+    [old1, old2 | newer] = backups = expired_backups!(c, 5)
+
+    for backup <- [old1, old2] do
+      path = Path.join(c.root, backup.artifact_id)
+      File.rm!(path)
+      File.mkdir_p!(Path.join(path, "blocked"))
+    end
+
+    failing = Enum.sort([old1.id, old2.id])
+    assert {:ok, %{deleted: [], errors: errors}} = Backup.purge_expired(c.operator, 73)
+    assert Enum.sort(Enum.map(errors, &elem(&1, 0))) == failing
+    assert {:ok, %{deleted: second, errors: []}} = Backup.purge_expired(c.operator, 73)
+    assert {:ok, %{deleted: third, errors: []}} = Backup.purge_expired(c.operator, 73)
+    assert second ++ third == Enum.map(newer, & &1.id)
+    assert {:ok, %{deleted: [], errors: []}} = Backup.purge_expired(c.operator, 73)
+
+    elapse_retry_interval!()
+    assert {:ok, %{deleted: [], errors: [_, _]}} = Backup.purge_expired(c.operator, 73)
+    elapse_retry_interval!()
+    assert {:ok, %{deleted: [], errors: []}} = Backup.purge_expired(c.operator, 73)
+
+    {:ok, %{holds: holds}} = Backup.summary(c.operator, 73)
+    assert Enum.sort(Enum.map(holds, & &1.id)) == failing
+
+    assert Enum.all?(
+             holds,
+             &(&1.purge_attempts == 2 and &1.purge_last_error == "cleanup_pending")
+           )
+
+    {:ok, actions} = Audit.list_actions(c.operator)
+    events = Enum.frequencies(Enum.map(actions, & &1.event))
+    assert events["people-connector.backup.purge_failed"] == 4
+    assert events["people-connector.backup.purge_held"] == 2
+
+    File.rm_rf!(Path.join(c.root, old1.artifact_id))
+    elapse_retry_interval!()
+    assert {:ok, %{deleted: [], errors: []}} = Backup.purge_expired(c.operator, 73)
+
+    {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/backups")
+    assert has_element?(view, "#people-backups-holds")
+    view |> element("#retry-purge-#{old1.id}") |> render_click()
+    refute has_element?(view, "#retry-purge-#{old1.id}")
+    assert has_element?(view, "#retry-purge-#{old2.id}")
+    assert {:error, :not_found} = Backup.retry_purge(c.operator, 73, old1.id)
+    assert {:error, _} = Backup.retry_purge(c.operator, 74, old2.id)
+    assert {:error, :cleanup_pending} = Backup.retry_purge(c.operator, 73, old2.id)
+    assert {:ok, %{holds: []}} = Backup.summary(c.operator, 73)
+
+    {:ok, actions} = Audit.list_actions(c.operator)
+    assert Enum.count(actions, &(&1.event == "people-connector.backup.purge_released")) == 2
+
+    {:ok, %{records: records}} = Backup.summary(c.operator, 73)
+    states = Map.new(records, &{&1.id, &1.state})
+    assert states[old1.id] == :purged and states[old2.id] == :expired
+    assert length(backups) == map_size(states)
   end
 
   test "preview binds state, expires, and cannot be used on a replacement connection", c do
@@ -375,6 +423,28 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
 
     assert has_element?(denied, "#people-backups-unavailable")
     refute has_element?(denied, "#people-backups-create")
+  end
+
+  defp expired_backups!(c, count) do
+    backups = for _ <- 1..count, do: elem(Backup.create(c.operator, 73), 1)
+
+    for {backup, age} <- Enum.zip(backups, count..1//-1) do
+      SQL.query!(
+        Repo,
+        "UPDATE people_connector_backups SET expires_at = now() - make_interval(secs => $1) WHERE id = $2",
+        [age, Ecto.UUID.dump!(backup.id)]
+      )
+    end
+
+    backups
+  end
+
+  defp elapse_retry_interval! do
+    SQL.query!(
+      Repo,
+      "UPDATE people_connector_backups SET purge_attempted_at = purge_attempted_at - interval '1 day'",
+      []
+    )
   end
 
   defp sync!(c, key) do

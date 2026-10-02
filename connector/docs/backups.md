@@ -22,9 +22,15 @@ Base Artifacts' installation retention. Changing policy affects new backups.
 Expired backups cannot be previewed/restored. **Clean expired backups** deletes
 private bytes through Base Artifacts; receipts and audit remain, and a cleaned
 receipt keeps its artifact reference with the `purged` state. Each run takes the
-next batch, bounded by the installation artifact batch setting; failed deletes
-stay `ready` and are retried by the next run. Artifacts' generic cleanup also handles incomplete storage
-reservations.
+next batch, bounded by the installation artifact batch setting. A failed delete
+records its attempt count, reason and time on the receipt and
+`people-connector.backup.purge_failed`; cleanup skips it until the artifact
+purge retry interval passes, so newer expired backups are still reached. After
+the artifact purge maximum attempts it is held (`people-connector.backup.purge_held`),
+excluded from batches and listed under **Held cleanup**; **Retry cleanup**
+releases the hold (`people-connector.backup.purge_released`) and deletes again.
+Retry interval and maximum attempts are Base Artifacts' installation settings.
+Artifacts' generic cleanup also handles incomplete storage reservations.
 
 ## Guarded restore
 
@@ -74,7 +80,8 @@ restore. No bytes, personal directory facts, cursor or secret enter action
 payloads.
 
 The public workflow is `Connector.Backup`: `summary/2`, `configure/3`,
-`create/2`, `preview/3`, `restore/5`, `recover/3`, `purge_expired/2`.
+`create/2`, `preview/3`, `restore/5`, `recover/3`, `purge_expired/2`,
+`retry_purge/3`.
 Company arguments are Core platform company IDs; each method takes a validated
 Tenancy Scope. Schema and artifact adapters remain internal to this module.
 
