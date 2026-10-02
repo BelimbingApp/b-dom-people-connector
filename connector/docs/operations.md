@@ -62,8 +62,9 @@ as a new request. Retain periods long enough for the installation's retry policy
 Checkpoint state survives run purges, so the next sync resumes normally.
 
 This workflow never purges checkpoints, workforce projections, reconciliation
-issues or Base audit history. It does not implement backup, recovery, remote
-native transport, vendor transport, scheduling or People business-data cleanup.
+issues or Base audit history. It does not implement remote native transport,
+vendor transport, scheduling or People business-data cleanup; backup and
+recovery are separate (see [backup and recovery](backups.md)).
 The only new table is the module-owned Bilimbi-only retention retry record,
 created by migration `20261002190001`; the same migration adds owned retention
 indexes. Existing applied migration files remain unchanged.

@@ -29,6 +29,37 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
     create_webhook_tables!()
     create_file_tables!()
     create_retention_tables!()
+    create_backup_tables!()
+  end
+
+  defp create_backup_tables! do
+    SQL.query!(
+      Repo,
+      """
+      CREATE TEMPORARY TABLE IF NOT EXISTS people_connector_backups (
+        id uuid PRIMARY KEY, tenant_id bigint NOT NULL, platform_company_id bigint NOT NULL,
+        connection_id bigint REFERENCES people_connector_connections(id) ON DELETE SET NULL,
+        sha256 varchar(64) NOT NULL, state varchar(10) NOT NULL,
+        artifact_id uuid, expires_at timestamp(6) NOT NULL,
+        preview_token_hash varchar(64), preview_state_hash varchar(64),
+        preview_actor_id bigint, preview_impersonator_id bigint, preview_expires_at timestamp(6),
+        recovery_generation integer, restored_at timestamp(6),
+        purge_attempts integer NOT NULL, purge_last_error varchar(255),
+        purge_attempted_at timestamp(6), purge_held_at timestamp(6),
+        inserted_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL,
+        CONSTRAINT people_connector_backups_state CHECK
+          (state IN ('pending','ready','failed','purged') AND
+           (state NOT IN ('ready','purged') OR artifact_id IS NOT NULL))
+      ) ON COMMIT PRESERVE ROWS
+      """,
+      []
+    )
+
+    SQL.query!(
+      Repo,
+      "CREATE INDEX IF NOT EXISTS people_connector_backups_tenant_id_platform_company_id_expires_ ON people_connector_backups (tenant_id, platform_company_id, expires_at)",
+      []
+    )
   end
 
   defp create_retention_tables! do
