@@ -16,7 +16,9 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
   alias Bilimbi.PeopleConnector.Connector.{Connection, Providers, WorkforceRecord}
   alias Bilimbi.PeopleConnector.Connector.FileExchange.{Owner, Record}
 
-  @format "people-directory-v1"
+  # v1 is immutable: company/employee records only. v2 adds position records.
+  @format_v1 "people-directory-v1"
+  @format_v2 "people-directory-v2"
   @policy [
     enabled: {"people-connector.files.enabled", :boolean, nil, nil},
     max_bytes: {"people-connector.files.max_bytes", :integer, 1, 10_485_760},
@@ -100,7 +102,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
          {:ok, %{freshness: :current, value: records}} <- Connector.workforce(scope, company),
          true <- length(records) <= policy(scope, company).max_records do
       envelope = %{
-        format: @format,
+        format: format_for(records),
         tenant_id: Scope.tenant_id(scope),
         platform_company_id: company,
         workforce_source_id: status.workforce_source_id,
@@ -232,13 +234,14 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
 
     valid? =
       Enum.sort(Map.keys(file)) == Enum.sort(@envelope_keys) and
-        file["format"] == @format and file["tenant_id"] === Scope.tenant_id(scope) and
+        file["format"] in [@format_v1, @format_v2] and
+        file["tenant_id"] === Scope.tenant_id(scope) and
         file["platform_company_id"] === status.platform_company_id and
         file["workforce_source_id"] == status.workforce_source_id and
         file["workforce_company_id"] === status.workforce_company_id and
         is_list(records) and
         length(records) <= policy(scope, status.platform_company_id).max_records and
-        Enum.all?(records, &valid_record?(&1, status)) and
+        Enum.all?(records, &valid_record?(&1, file["format"], status)) and
         length(Enum.uniq_by(records, &{&1["kind"], &1["stable_id"]})) == length(records)
 
     if valid?, do: :ok, else: {:error, :invalid_file}
@@ -246,7 +249,12 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
 
   defp validate(_, _, _), do: {:error, :invalid_file}
 
-  defp valid_record?(record, status) when is_map(record) do
+  defp valid_record?(record, @format_v1, status) when is_map(record) do
+    Enum.sort(Map.keys(record)) == Enum.sort(@record_keys) and
+      record["kind"] in ["company", "employee"] and valid_record?(record, @format_v2, status)
+  end
+
+  defp valid_record?(record, @format_v2, status) when is_map(record) do
     with true <- Enum.sort(Map.keys(record) -- @organisation_keys) == Enum.sort(@record_keys),
          kind when kind in ["company", "employee", "position"] <- record["kind"],
          timestamp when is_binary(timestamp) <- record["observed_at"],
@@ -280,7 +288,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     end
   end
 
-  defp valid_record?(_, _), do: false
+  defp valid_record?(_, _, _), do: false
 
   defp parse_assignments(values) when is_list(values) and length(values) <= 500 do
     Enum.map(values, fn
@@ -295,6 +303,9 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
   end
 
   defp parse_assignments(_), do: nil
+
+  defp format_for(records),
+    do: if(Enum.any?(records, &(&1.kind == :position)), do: @format_v2, else: @format_v1)
 
   defp encode_record(record) do
     record

@@ -67,6 +67,15 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
       FileExchange.download(c.operator, 73, exported.id)
 
     document = Jason.decode!(bytes)
+    assert document["format"] == "people-directory-v2"
+
+    assert {:error, :invalid_file} =
+             FileExchange.import_file(
+               c.operator,
+               73,
+               Jason.encode!(Map.put(document, "format", "people-directory-v1"))
+             )
+
     projected = Enum.find(document["records"], &(&1["kind"] == "position"))
     assert projected["stable_id"] == to_string(position.id)
     assert projected["vacant"] and projected["version"] == 1
@@ -177,6 +186,13 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
     base = Jason.decode!(file())
 
+    assert {:ok, %{replayed?: false}} =
+             FileExchange.import_file(
+               c.operator,
+               73,
+               Jason.encode!(Map.put(base, "records", [record]))
+             )
+
     for invalid <- [
           "garbage",
           "[]",
@@ -191,6 +207,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
           Jason.encode!(Map.put(base, "workforce_source_id", "remote")),
           Jason.encode!(Map.put(base, "records", [%{}])),
           Jason.encode!(Map.put(base, "records", [record, record])),
+          Jason.encode!(Map.put(base, "records", [Map.put(record, "vacant", false)])),
           Jason.encode!(Map.put(base, "extra", "unsupported"))
         ] do
       assert {:error, :invalid_file} = FileExchange.import_file(c.operator, 73, invalid)
@@ -208,8 +225,8 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
     {:ok, _} = FileExchange.configure(c.operator, 73, %{max_bytes: 1})
     assert {:error, :file_too_large} = FileExchange.import_file(c.operator, 73, file())
-    assert count("base_artifacts") == 0
-    assert count("people_connector_file_exchanges") == 0
+    assert count("base_artifacts") == 1
+    assert count("people_connector_file_exchanges") == 1
   end
 
   test "disabled format/connection and changed mapping refuse, expiry blocks bytes and purges",
