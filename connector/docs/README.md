@@ -155,3 +155,20 @@ per-row retries. Retention periods default to keeping records.
 
 Operator backup and recovery uses private Base Artifacts and an actor-bound,
 confirmed restore; see [backup and recovery](backups.md).
+
+## Fresh schema verification
+
+`Connector.SchemaContract` describes the nine connection, sync, projection,
+reconciliation, webhook, file and retention relations. The existing
+`Connector.Backup.SchemaContract` covers backup receipts. Verify both explicitly
+**after** fresh migrations with `Bilimbi.Base.Database.SchemaVerifier.verify/2`,
+then run `Connector.SchemaContract.verify_invariants/2` for connection ownership,
+current projection mappings and replay identities. Both accept a `prefix`
+option for an isolated schema. These Bilimbi-only tables remain unregistered
+for pre-migration compatibility adoption.
+
+`connector/test/schema_contract_test.exs` runs the real migrations in an isolated
+schema and checks canonical PostgreSQL predicates, structural drift and data
+invariants. The timezone-sensitive web fixtures bind UTC timestamps through
+`Connector.TestFixtures.utc_query!/3`; CI repeats those suites with a non-UTC
+database timezone.

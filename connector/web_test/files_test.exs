@@ -183,7 +183,13 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
     SQL.query!(Repo, "UPDATE people_connector_connections SET workforce_company_id = 999", [])
     assert {:error, _} = FileExchange.download(c.operator, 73, imported.id)
     SQL.query!(Repo, "UPDATE people_connector_connections SET workforce_company_id = 73", [])
-    SQL.query!(Repo, "UPDATE base_artifacts SET expires_at = now() - interval '1 second'", [])
+
+    ConnectorFixtures.utc_query!(
+      Repo,
+      "UPDATE base_artifacts SET expires_at = now() - interval '1 second'",
+      []
+    )
+
     assert {:error, :not_found} = FileExchange.download(c.operator, 73, imported.id)
     assert {:ok, %{deleted: [_], errors: []}} = FileExchange.purge_expired(c.operator, 73)
     refute File.exists?(Path.join(c.root, imported.artifact_id))
@@ -198,7 +204,13 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
     {:ok, _} = Connector.configure_connection(c.operator, 73, c.registry, Providers.native_id())
     {:ok, _} = Connector.set_enabled(c.operator, 73, c.registry, true)
     assert {:error, _} = FileExchange.download(c.operator, 73, imported.id)
-    SQL.query!(Repo, "UPDATE base_artifacts SET expires_at = now() - interval '1 second'", [])
+
+    ConnectorFixtures.utc_query!(
+      Repo,
+      "UPDATE base_artifacts SET expires_at = now() - interval '1 second'",
+      []
+    )
+
     assert {:ok, %{deleted: [_], errors: []}} = FileExchange.purge_expired(c.operator, 73)
     refute File.exists?(Path.join(c.root, imported.artifact_id))
   end
@@ -301,7 +313,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
     {:ok, _} = FileExchange.configure(c.operator, 73, %{stale_minutes: 5})
 
-    SQL.query!(
+    ConnectorFixtures.utc_query!(
       Repo,
       "UPDATE people_connector_file_exchanges SET updated_at = now() - interval '6 minutes'",
       []
@@ -332,7 +344,11 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
   defp expire! do
     for table <- ["base_artifacts", "people_connector_file_exchanges"] do
-      SQL.query!(Repo, "UPDATE #{table} SET expires_at = now() - interval '1 second'", [])
+      ConnectorFixtures.utc_query!(
+        Repo,
+        "UPDATE #{table} SET expires_at = now() - interval '1 second'",
+        []
+      )
     end
   end
 

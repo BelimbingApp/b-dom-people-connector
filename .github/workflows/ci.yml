@@ -167,6 +167,12 @@ jobs:
         if: matrix.topology != 'connector_only'
         run: mix precommit
 
+      - name: Verify Connector fixtures with a non-UTC database timezone
+        if: matrix.topology == 'both'
+        run: |
+          psql -d postgres -v ON_ERROR_STOP=1 -c "ALTER DATABASE bilimbi_test SET timezone TO 'Asia/Kuala_Lumpur'"
+          (cd apps/web && mix test ../domains/people_connector/connector/web_test/files_test.exs ../domains/people_connector/connector/web_test/operations_test.exs ../domains/people_connector/connector/web_test/backups_test.exs)
+
       - name: Verify precommit made no changes
         if: matrix.topology != 'connector_only'
         run: |

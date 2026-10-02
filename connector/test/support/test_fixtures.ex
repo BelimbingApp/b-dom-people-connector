@@ -4,6 +4,18 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
   alias Bilimbi.Base.Repo
   alias Ecto.Adapters.SQL
 
+  # PostgreSQL now() is timestamptz: assigning it to our UTC-naive columns
+  # otherwise converts through the session timezone. Bind a UTC timestamp instead.
+  def utc_query!(repo, statement, params) do
+    parameter = "$#{length(params) + 1}::timestamp"
+
+    SQL.query!(
+      repo,
+      String.replace(statement, "now()", parameter),
+      params ++ [NaiveDateTime.utc_now()]
+    )
+  end
+
   # Mirrors the owned migration so tests run without the shared migrated schema.
   def create_connection_tables! do
     SQL.query!(
