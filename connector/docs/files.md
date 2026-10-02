@@ -70,3 +70,7 @@ host, require connection management, and return an attachment with private/no-st
 and nosniff headers. Failed access reveals no bytes. Module action audit records
 signed-in actor and company with receipt/artifact IDs and counts only. New receipt
 schema is Bilimbi-only; there is no legacy import/adoption path.
+
+Receipt retention is separate from private byte expiry. See
+[Health and retention](operations.md) for company periods and audited receipt
+purges after Base confirms expired byte cleanup.

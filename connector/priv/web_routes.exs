@@ -1,5 +1,11 @@
 [
   %{
+    path: "/integrations/people/operations",
+    live: Bilimbi.PeopleConnector.Connector.Web.OperationsLive,
+    session: :auth,
+    capability: "people-connector.connections.manage"
+  },
+  %{
     path: "/integrations/people/files",
     live: Bilimbi.PeopleConnector.Connector.Web.FilesLive,
     session: :auth,
