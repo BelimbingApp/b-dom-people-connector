@@ -28,7 +28,7 @@ identity.
 ## Storage
 
 The module owns fresh Bilimbi-only tables. `people_connector_connections`
-(migration `20260930200101`) holds connections: a platform company has at most
+(migration `20261002070001`) holds connections: a platform company has at most
 one, and one workforce company identity backs at most one platform company in
 a tenant; the database enforces both. Migration `20260930220101` adds the
 synchronisation tables, each cascading from its connection:
