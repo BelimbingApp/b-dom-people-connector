@@ -5,7 +5,7 @@ accessible platform company, enable file exchange and the directory JSON format,
 and set byte and record limits. Only enabled co-located native connections with
 a current Workforce mapping are accepted. Remote and vendor formats are refused.
 
-Export captures the current synchronised company/employee directory. Run
+Export captures the current synchronised company, employee and position directory. Run
 **Synchronise now** first when the directory is stale or unavailable. Import
 validates and privately retains a directory file for review; it does not update
 live projections, advance a checkpoint, restore a connection or change People
@@ -16,8 +16,11 @@ The immutable format is `people-directory-v1`. The JSON object has exactly
 `format`, `tenant_id`, `platform_company_id`, `workforce_source_id`,
 `workforce_company_id`, and `records`. Platform company identifies Core Company;
 workforce company and source identify the separate People Workforce mapping.
-Each record has exactly the WorkforceRecord fields, with `kind` as `company` or
-`employee` and `observed_at` as an ISO-8601 instant. Source and workforce company
+Each record has exactly the WorkforceRecord fields, with `kind` as `company`,
+`employee` or `position` and `observed_at` as an ISO-8601 instant. Position records
+also carry `parent_stable_id`, `version`, `vacant`, `assignments_incomplete`
+and at most 500 `assignments`, each with exactly `source_id`, `stable_id`,
+`employee_stable_id` and `kind`. Source and workforce company
 must match the selected connection. Duplicate kind/stable-ID pairs, invalid
 record fields, extra envelope/record fields and unsupported formats are refused.
 No names, filenames or document contents enter exchange audit payloads.

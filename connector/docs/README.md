@@ -96,7 +96,6 @@ again and deactivates records the provider no longer lists. A provider without
 a change feed marks each page `snapshot: true`; when every page of a pass is a
 snapshot, a changes pass also deactivates records it no longer lists.
 
-The engine reads every page of each declared stream before applying any.
 The organisation stream is authorized separately as `organization_directory`.
 A stale or failed stream prevents the entire pass from being applied. An
 unavailable organisation stream does not, nor does a provider that stops
@@ -113,7 +112,7 @@ includes kind, source and stable ID. Parent, version, vacancy, assignment
 completeness and holder identities are projected without writing People history.
 Migration `20261003120001` adds those projection fields.
 
-The engine reads every page before applying any. A stale or unavailable page
+The engine reads every page of each declared stream before applying any. A stale or unavailable page
 (Workforce freshness vocabulary), an adapter error or exception, a repeated
 page cursor, or a page over the limit or of the wrong shape ends the run
 `:stale`, `:unavailable` or `:failed` with nothing applied. Otherwise, in one
