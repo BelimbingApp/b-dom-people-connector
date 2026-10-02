@@ -156,6 +156,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.OperationsLive do
               <:actions><.button id="people-doctor-run" phx-click="run_doctor" phx-disable-with="Checking…">Run health check</.button></:actions>
             </.section_heading>
             <div class="flex flex-wrap gap-3 mb-3">
+              <.action_link id="people-operations-backups" icon="manage" title="Backup and recovery" navigate={~p"/integrations/people/backups?company_id=#{@company.id}"}>Backup and recovery</.action_link>
               <.action_link id="people-operations-connections" icon="manage" title="People connections" navigate={~p"/integrations/people/connections?company_id=#{@company.id}"}>People connections</.action_link>
               <.action_link id="people-operations-files" icon="manage" title="File exchange" navigate={~p"/integrations/people/files?company_id=#{@company.id}"}>File exchange</.action_link>
             </div>

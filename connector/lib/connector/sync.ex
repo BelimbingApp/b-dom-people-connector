@@ -151,7 +151,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     policy = policy(scope, status.platform_company_id)
     full? = Keyword.get(opts, :full, false) == true
 
-    case start(scope, status, key, policy, full?) do
+    case start(scope, status, key, policy, full?, Keyword.get(opts, :expected_checkpoint_version)) do
       {:ok, {:existing, run}} ->
         {:ok, run}
 
@@ -268,7 +268,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   ## Start
 
-  defp start(scope, status, key, policy, full?) do
+  defp start(scope, status, key, policy, full?, expected_checkpoint) do
     transact(fn ->
       with {:ok, connection} <- lock_connection(scope, status) do
         now = DateTime.utc_now()
@@ -283,7 +283,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
             {:ok, {:existing, run}}
 
           nil ->
-            begin_run(connection, key, full?, now)
+            if not is_nil(expected_checkpoint) and
+                 checkpoint_version(get_checkpoint(connection)) != expected_checkpoint,
+               do: {:error, :checkpoint_moved},
+               else: begin_run(connection, key, full?, now)
         end
       end
     end)

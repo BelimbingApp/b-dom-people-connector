@@ -152,3 +152,6 @@ Native directory snapshots can be exchanged privately for operator review; see
 Operator-run [connection health and record retention](operations.md) diagnose
 connection failures and purge only eligible operational history with audited
 per-row retries. Retention periods default to keeping records.
+
+Operator backup and recovery uses private Base Artifacts and an actor-bound,
+confirmed restore; see [backup and recovery](backups.md).

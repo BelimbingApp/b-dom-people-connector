@@ -8,7 +8,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
     %{
       settings: %{
         definitions:
-          Map.merge(retention_definitions(), %{
+          Map.merge(Map.merge(retention_definitions(), backup_definitions()), %{
             "people-connector.files.enabled" => %{
               type: :boolean,
               scopes: [:company],
@@ -123,6 +123,25 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
       ]
     }
   end
+
+  defp backup_definitions do
+    Map.new(Bilimbi.PeopleConnector.Connector.Backup.fields(), fn {field,
+                                                                   {key, default, min, max}} ->
+      {key,
+       %{
+         type: :integer,
+         scopes: [:company],
+         default: default,
+         minimum: min,
+         maximum: max,
+         label: backup_label(field),
+         capability: "people-connector.connections.manage"
+       }}
+    end)
+  end
+
+  defp backup_label(:retention_days), do: "Backup retention (days)"
+  defp backup_label(:preview_minutes), do: "Restore preview validity (minutes)"
 
   defp retention_definitions do
     Map.new(Bilimbi.PeopleConnector.Connector.Retention.fields(), fn {field,
