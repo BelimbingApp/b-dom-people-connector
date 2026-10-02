@@ -199,7 +199,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.FilesLive do
             <:col :let={row} label="State">{exchange_state(row.state)}</:col>
             <:col :let={row} label="Created"><.datetime id={"people-file-date-#{row.id}"} value={row.inserted_at} /></:col>
             <:action :let={row}><.link :if={row.state == :ready} href={~p"/integrations/people/files/#{@company.id}/#{row.id}"}>Download</.link></:action>
-            <:empty>No files exchanged.</:empty>
+            <:empty :if={@summary.records == []}>No files exchanged.</:empty>
           </.table>
         </section>
       </.page>

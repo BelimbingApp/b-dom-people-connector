@@ -219,6 +219,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
   test "operator uploads a file and edits settings on the real page", c do
     {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/files")
     assert has_element?(view, "#people-files-policy")
+    assert render(view) =~ "No files exchanged."
 
     upload =
       file_input(view, "#people-files-import", :directory, [
@@ -228,6 +229,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
     assert render_upload(upload, "directory.json") =~ "100"
     view |> form("#people-files-import") |> render_submit()
     assert has_element?(view, "#people-files-history", "Import for review")
+    refute render(view) =~ "No files exchanged."
 
     view
     |> form("#people-files-policy",
