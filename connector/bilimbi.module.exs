@@ -7,6 +7,7 @@
   namespace: Bilimbi.PeopleConnector.Connector,
   dependencies: [
     "base/audit",
+    "base/artifacts",
     "base/authz",
     "base/database",
     "base/menu",
@@ -21,7 +22,8 @@
   migration_dispositions: %{
     20_261_002_070_001 => :bilimbi_only,
     20_261_002_070_002 => :bilimbi_only,
-    20_261_002_070_003 => :bilimbi_only
+    20_261_002_070_003 => :bilimbi_only,
+    20_261_002_173_001 => :bilimbi_only
   },
   web: "priv/web_routes.exs",
   # Compatibility verification runs before pending Bilimbi-only migrations.

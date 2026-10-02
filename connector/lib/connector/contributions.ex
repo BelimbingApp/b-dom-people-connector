@@ -8,6 +8,37 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
     %{
       settings: %{
         definitions: %{
+          "people-connector.files.enabled" => %{
+            type: :boolean,
+            scopes: [:company],
+            default: false
+          },
+          "people-connector.files.json_enabled" => %{
+            type: :boolean,
+            scopes: [:company],
+            default: true
+          },
+          "people-connector.files.max_bytes" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 1_048_576,
+            minimum: 1,
+            maximum: 10_485_760
+          },
+          "people-connector.files.max_records" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 1000,
+            minimum: 1,
+            maximum: 100_000
+          },
+          "people-connector.files.stale_minutes" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 15,
+            minimum: 1,
+            maximum: 1440
+          },
           # Written only through the Connector facade and its connections page,
           # so it is not editable on the generic settings screen and has no
           # reveal path.

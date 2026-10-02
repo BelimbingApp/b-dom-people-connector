@@ -145,3 +145,6 @@ shows the last accepted directory-change notification. See
 [native inbound notifications](webhooks.md) for the exact signature, replay,
 retry and audit contract. Receipt intake does not activate remote transport or
 run synchronisation as a machine sender.
+
+Native directory snapshots can be exchanged privately for operator review; see
+[file exchange](files.md) for format, settings, replay and retention rules.
