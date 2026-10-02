@@ -11,6 +11,25 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
           # Written only through the Connector facade and its connections page,
           # so it is not editable on the generic settings screen and has no
           # reveal path.
+          "people-connector.webhook.secret" => %{
+            type: :string,
+            scopes: [:company],
+            default: nil,
+            nullable: true,
+            encrypted: true
+          },
+          "people-connector.webhook.enabled" => %{
+            type: :boolean,
+            scopes: [:company],
+            default: false
+          },
+          "people-connector.webhook.max_skew_seconds" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 300,
+            minimum: 1,
+            maximum: 86_400
+          },
           "people-connector.connection.credential" => %{
             type: :string,
             scopes: [:company],

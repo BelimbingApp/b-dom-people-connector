@@ -43,6 +43,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
   alias Bilimbi.PeopleConnector.Connector.Sync
   alias Bilimbi.PeopleConnector.Connector.SyncRun
   alias Bilimbi.PeopleConnector.Connector.SyncSummary
+  alias Bilimbi.PeopleConnector.Connector.Webhooks
 
   @manage_capability "people-connector.connections.manage"
   @credential_key "people-connector.connection.credential"
@@ -174,6 +175,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
          %Connection{} = connection <- get_connection(scope, company_id) do
       transact(fn ->
         :ok = Settings.delete(@credential_key, settings_scope(connection))
+        :ok = Webhooks.clear(connection)
         Repo.delete(connection)
       end)
       |> case do
@@ -297,6 +299,21 @@ defmodule Bilimbi.PeopleConnector.Connector do
     end
   end
 
+  @doc "The native webhook policy and last receipt, without revealing its secret."
+  def webhook_summary(%Scope{} = scope, platform_company_id) do
+    with {:ok, status} <- status(scope, platform_company_id) do
+      {:ok, Webhooks.summary(scope, status.platform_company_id)}
+    end
+  end
+
+  @doc "Configures native inbound intake; requires normal connection-management authority."
+  def put_webhook_settings(%Scope{} = scope, platform_company_id, values) do
+    with {:ok, company_id} <- authorize(scope, platform_company_id),
+         {:ok, _status} <- status(scope, company_id) do
+      Webhooks.configure(scope, company_id, values)
+    end
+  end
+
   defp enabled_status(scope, company_id) do
     case status(scope, company_id) do
       {:ok, %Status{state: :enabled} = status} -> {:ok, status}
@@ -364,7 +381,10 @@ defmodule Bilimbi.PeopleConnector.Connector do
 
           # Records synchronised from another provider or workforce company
           # must not survive as this mapping's data.
-          if provider_changed? or remapped?, do: :ok = Sync.reset(connection)
+          if provider_changed? or remapped? do
+            :ok = Sync.reset(connection)
+            :ok = Webhooks.clear(connection)
+          end
 
           changes =
             if provider_changed? or remapped?,

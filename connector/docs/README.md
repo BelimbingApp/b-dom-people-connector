@@ -28,9 +28,9 @@ identity.
 ## Storage
 
 The module owns fresh Bilimbi-only tables. `people_connector_connections`
-(migration `20260930200101`) holds connections: a platform company has at most
+(migration `20261002070001`) holds connections: a platform company has at most
 one, and one workforce company identity backs at most one platform company in
-a tenant; the database enforces both. Migration `20260930220101` adds the
+a tenant; the database enforces both. Migration `20261002070002` adds the
 synchronisation tables, each cascading from its connection:
 `people_connector_sync_checkpoints` (one per connection),
 `people_connector_sync_runs` (unique idempotency key per connection, at most
@@ -137,3 +137,11 @@ pass and open issues. Managers also get **Synchronise now** and **Full read**
 the policy form. The menu
 leaf **Administration › System › Integrations › People connections** carries
 the view capability; the route enforces it again.
+
+## Inbound notifications
+
+The connection page configures encrypted native webhook signing settings and
+shows the last accepted directory-change notification. See
+[native inbound notifications](webhooks.md) for the exact signature, replay,
+retry and audit contract. Receipt intake does not activate remote transport or
+run synchronisation as a machine sender.
