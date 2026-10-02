@@ -319,6 +319,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
   test "operator runs doctor, edits retention inline, confirms purge, and revoked events refuse",
        c do
     run = sync!(c, "page-old")
+    latest = sync!(c, "page-latest")
     age_runs!()
     {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/operations")
     assert has_element?(view, "#people-doctor-empty")
@@ -330,11 +331,12 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     assert {:ok, %{sync_days: 1}} = Retention.policy(c.operator, 73)
     view |> element("#people-retention-request") |> render_click()
     assert has_element?(view, "#people-retention-confirm")
-    assert count("people_connector_sync_runs") == 1
+    assert count("people_connector_sync_runs") == 2
     view |> element("#people-retention-confirm button", "Purge") |> render_click()
     refute has_element?(view, "#people-retention-confirm")
     assert has_element?(view, "#people-retention-result", "Removed")
-    assert count("people_connector_sync_runs") == 0
+    # The connection's latest run survives; only the older run is removed.
+    assert SQL.query!(Repo, "SELECT id FROM people_connector_sync_runs", []).rows == [[latest.id]]
     # Once retention removes the run, its old key starts a new pass.
     replay = sync!(c, "page-old")
     refute replay.id == run.id
@@ -344,7 +346,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     render_hook(view, "save_policy", %{"sync_days" => "2"})
     render_hook(view, "request_purge", %{})
     render_hook(view, "purge", %{})
-    assert count("people_connector_sync_runs") == 1
+    assert count("people_connector_sync_runs") == 2
   end
 
   defp check(report, code), do: Enum.find(report.checks, &(&1.code == code))
