@@ -9,8 +9,11 @@ write ports. Duplicate or invalid declarations are refused. A provider also
 declares whether a connection needs a credential (`:none` or `:secret`).
 `Providers.installed/0` is the catalog operators choose from: only the
 co-located native People provider (`people.native`), which reads through
-People Workforce, declares company, employee and organisation directory reads, and needs no
-credential. Remote and third-party providers are not offered.
+People Workforce, declares company and employee directory reads, and needs no
+credential. It declares organisation directory reads only while
+`Workforce.positions_available?/0` reports a registered position reader, so a
+host without People Organisation never reads or warns about positions. Remote
+and third-party providers are not offered.
 
 ## Company axes
 
@@ -95,7 +98,8 @@ snapshot, a changes pass also deactivates records it no longer lists.
 The engine reads every page of each declared stream before applying any.
 The organisation stream is authorized separately as `organization_directory`.
 A stale or failed stream prevents the entire pass from being applied. An
-unavailable organisation stream does not: the directory stream is applied,
+organisation stream that becomes unavailable after the provider declared it
+does not: the directory stream is applied,
 positions are left as they were, and an `organisation_unavailable` warning
 issue stays open until a later pass reads the organisation stream. Absent
 positions are deactivated only when the organisation stream arrived in a

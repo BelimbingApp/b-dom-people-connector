@@ -460,6 +460,22 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
       refute Enum.any?(remaining, &(&1.kind == :position))
     end
 
+    test "without a position reader the provider declares no organisation stream", context do
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      {:ok, provider} = Registry.fetch(Providers.installed(), "people.native")
+      refute Enum.any?(provider.capabilities, &(&1.key == "organization_directory"))
+      employee!(context.scope, 73, "E-1")
+
+      assert {:ok, %{state: :succeeded, applied: 2}} =
+               sync(%{context | provider: provider}, "no-reader")
+
+      refute_received {:positions_read, _, _}
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      refute Enum.any?(records, &(&1.kind == :position))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+      assert summary.open_issues == []
+    end
+
     test "a missing organisation reader keeps the directory in sync and opens an issue",
          context do
       Process.put(:native_test_positions, [position(9)])

@@ -235,7 +235,7 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
     assert Enum.any?(
              provider.capabilities,
              &(&1.key == "organization_directory" and &1.direction == :read)
-           )
+           ) == Workforce.positions_available?()
 
     assert Enum.all?(provider.capabilities, &(&1.direction == :read))
   end

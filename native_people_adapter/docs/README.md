@@ -10,8 +10,10 @@ refusing passes with `:adapter_unavailable`.
 
 ## What it serves
 
-Only what the provider declares in `Connector.Providers`: `company_directory`,
-`employee_directory` and `organization_directory` reads. The Connector runs
+Only what the provider declares in `Connector.Providers`: `company_directory`
+and `employee_directory` reads, plus `organization_directory` reads while
+`Workforce.positions_available?/0` reports a registered position reader. The
+Connector runs
 the company/employee stream under
 the `employee_directory` authorization, and the adapter returns the company
 first and then its employees as `WorkforceRecord` values. Employee records carry
@@ -62,9 +64,11 @@ so this is a live read, not a frozen database snapshot: concurrent position
 changes can affect later pages. The Connector therefore deactivates absent
 positions only when the stream arrived in a single page; with more pages an
 ended position stays active until a pass fits in one page. A full page may be
-followed by an empty final page. Missing Organisation returns unavailable; the
-Connector still applies company and employee changes, leaves positions as they
-were and opens an `organisation_unavailable` issue.
+followed by an empty final page. Without People Organisation the provider does
+not declare the organisation stream, so no position is read and no issue is
+opened. If the reader disappears after the stream was declared, the adapter
+returns unavailable; the Connector still applies company and employee changes,
+leaves positions as they were and opens an `organisation_unavailable` issue.
 
 The engine reads the declared organisation stream alongside company/employees
 before applying the combined pass. Position projection identity includes kind,
