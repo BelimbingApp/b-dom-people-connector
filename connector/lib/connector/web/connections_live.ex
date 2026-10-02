@@ -20,7 +20,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   @view_capability "people-connector.connections.view"
   @credential_mask "••••••••"
-  @write_events ~w(configure set_enabled save_credential request_remove remove synchronise resolve_issue save_policy)
+  @write_events ~w(configure set_enabled save_credential request_remove remove synchronise resolve_issue save_policy save_webhook)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -155,6 +155,24 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
     end
   end
 
+  def handle_event("save_webhook", %{"webhook" => params}, socket) do
+    case Integer.parse(Map.get(params, "max_skew_seconds", "")) do
+      {skew, ""} ->
+        values = %{enabled: params["enabled"] == "true", max_skew_seconds: skew}
+        # Phoenix filters password parameters from event logs; a field named
+        # secret would expose a newly entered signing value in development.
+        secret = Map.get(params, "password", @credential_mask)
+        values = if secret == @credential_mask, do: values, else: Map.put(values, :secret, secret)
+
+        socket.assigns.current_scope.scope
+        |> Connector.put_webhook_settings(socket.assigns.company.id, values)
+        |> after_write(socket, "Webhook settings saved.")
+
+      _ ->
+        after_write({:error, :invalid_webhook_settings}, socket, nil)
+    end
+  end
+
   def handle_event("request_remove", _params, socket),
     do: {:noreply, assign(socket, :pending_remove, true)}
 
@@ -194,12 +212,16 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
         remap?: false,
         can_manage?: false,
         provider: nil,
+        webhook: nil,
         sync: nil
       )
 
   defp select_company(%{assigns: %{companies: [first | _] = companies}} = socket, company_id) do
     company = Enum.find(companies, first, &(Integer.to_string(&1.id) == company_id))
     socket = assign(socket, company: company, can_manage?: can_manage?(socket, company))
+
+    webhook = webhook_summary(socket, company.id)
+    socket = assign(socket, :webhook_form, webhook_form(webhook))
 
     case Connector.status(socket.assigns.current_scope.scope, company.id) do
       {:ok, status} ->
@@ -208,6 +230,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           workforce_notice: nil,
           remap?: false,
           provider: provider(socket.assigns.registry, status.provider_id),
+          webhook: webhook,
           sync: sync_summary(socket, company.id)
         )
 
@@ -217,6 +240,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           workforce_notice: workforce_notice(reason),
           remap?: reason == :mapping_changed,
           provider: nil,
+          webhook: nil,
           sync: nil
         )
     end
@@ -244,6 +268,26 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   defp sync_summary(socket, company_id) do
     case Connector.sync_summary(socket.assigns.current_scope.scope, company_id) do
+      {:ok, summary} -> summary
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp webhook_form(nil), do: nil
+
+  defp webhook_form(summary) do
+    to_form(
+      %{
+        "enabled" => to_string(summary.enabled),
+        "max_skew_seconds" => summary.max_skew_seconds,
+        "password" => if(summary.secret_stored?, do: @credential_mask, else: "")
+      },
+      as: :webhook
+    )
+  end
+
+  defp webhook_summary(socket, company_id) do
+    case Connector.webhook_summary(socket.assigns.current_scope.scope, company_id) do
       {:ok, summary} -> summary
       {:error, _reason} -> nil
     end
@@ -362,6 +406,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   defp workforce_notice(:not_found),
     do: "This company has no workforce identity. Choose another company."
+
+  defp refusal_message(:invalid_webhook_settings),
+    do: "Enter a secret of 32–4096 bytes and an allowed clock difference of 1–86400 seconds."
+
+  defp refusal_message(:webhook_secret_missing),
+    do: "Store a webhook signing secret before enabling intake."
 
   defp refusal_message(:unauthorized),
     do: "You cannot change connections for this company. Ask an administrator for access."
@@ -536,6 +586,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
         <.sync_section
           :if={@sync && @connection_status && @connection_status.state != :disconnected}
           sync={@sync}
+          webhook={@webhook}
+          webhook_form={@webhook_form}
           can_manage?={@can_manage?}
           enabled?={@connection_status.state == :enabled}
           sync_key={@sync_key}
@@ -549,9 +601,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           detail={
             if @connection_status && @connection_status.credential_stored?,
               do:
-                "Its stored credential and synchronised records are deleted. People records are not changed. You can connect again later.",
+                "Its stored credential, signing secret, synchronised records and notification history are deleted. People records are not changed. You can connect again later.",
               else:
-                "Its synchronised records are deleted. People records are not changed. You can connect again later."
+                "Its synchronised records, signing secret and notification history are deleted. People records are not changed. You can connect again later."
           }
           confirm="Remove"
           working="Removing…"
@@ -614,6 +666,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
   attr(:enabled?, :boolean, required: true)
   attr(:sync_key, :string, required: true)
   attr(:policy_fields, :list, required: true)
+
+  attr(:webhook, :any, required: true)
+  attr(:webhook_form, :any, required: true)
 
   defp sync_section(assigns) do
     ~H"""
@@ -704,6 +759,29 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           <:empty :if={@sync.open_issues == []}>No open issues.</:empty>
         </.table>
       </div>
+
+      <section :if={@webhook} id="people-connections-webhook" class="my-5 border-t border-line pt-4">
+        <.section_heading id="people-connections-webhook-heading" title="Inbound notifications" />
+        <.list>
+          <:item title="Intake">
+            <span id="people-connections-webhook-state">{if @webhook.enabled and @enabled?, do: "Enabled", else: "Disabled"}</span>
+          </:item>
+          <:item title="Signing secret">
+            <span id="people-connections-webhook-secret-state">{if @webhook.secret_stored?, do: "Stored", else: "Not stored"}</span>
+          </:item>
+          <:item title="Last directory-change notification">
+            <.datetime :if={@webhook.last_received_at} id="people-connections-webhook-received" value={@webhook.last_received_at} />
+            <span :if={is_nil(@webhook.last_received_at)}>None yet</span>
+          </:item>
+        </.list>
+        <p class="my-3 text-sm text-muted">Notifications are recorded for review. Use Synchronise now to refresh the directory.</p>
+        <.form :if={@can_manage?} for={@webhook_form} :let={f} id="people-connections-webhook-form" phx-submit="save_webhook">
+          <.input field={f[:enabled]} type="select" label="Inbound intake" hint="Receiving notifications also requires an enabled workforce connection." options={[{"Disabled", "false"}, {"Enabled", "true"}]} />
+          <.secret_input field={f[:password]} subject="webhook signing secret" label="Signing secret" reveal={false} />
+          <.input field={f[:max_skew_seconds]} type="number" label="Allowed clock difference (seconds)" min="1" max="86400" required />
+          <.button id="people-connections-webhook-save" type="submit" phx-disable-with="Saving…">Save webhook settings</.button>
+        </.form>
+      </section>
 
       <form
         :if={@can_manage?}

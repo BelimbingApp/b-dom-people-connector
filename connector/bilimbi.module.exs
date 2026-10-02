@@ -6,6 +6,7 @@
   otp_app: :bilimbi_people_connector_connector,
   namespace: Bilimbi.PeopleConnector.Connector,
   dependencies: [
+    "base/audit",
     "base/authz",
     "base/database",
     "base/menu",
@@ -19,7 +20,8 @@
   migrations: "priv/repo/migrations",
   migration_dispositions: %{
     20_261_002_070_001 => :bilimbi_only,
-    20_260_930_220_101 => :bilimbi_only
+    20_261_002_070_002 => :bilimbi_only,
+    20_261_002_070_003 => :bilimbi_only
   },
   web: "priv/web_routes.exs",
   # Compatibility verification runs before pending Bilimbi-only migrations.

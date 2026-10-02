@@ -26,6 +26,29 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
     )
 
     create_sync_tables!()
+    create_webhook_tables!()
+  end
+
+  defp create_webhook_tables! do
+    for {table, identity, extra} <- [
+          {"people_connector_webhook_deliveries", "delivery_hash",
+           "body_hash varchar(64) NOT NULL,"},
+          {"people_connector_webhook_nonces", "nonce_hash", ""}
+        ] do
+      SQL.query!(
+        Repo,
+        """
+        CREATE TEMPORARY TABLE IF NOT EXISTS #{table} (
+          id bigserial PRIMARY KEY, tenant_id bigint NOT NULL,
+          connection_id bigint NOT NULL REFERENCES people_connector_connections(id) ON DELETE CASCADE,
+          #{identity} varchar(64) NOT NULL, #{extra}
+          received_at timestamp NOT NULL,
+          CONSTRAINT #{table}_identity_unique UNIQUE (connection_id, #{identity})
+        ) ON COMMIT PRESERVE ROWS
+        """,
+        []
+      )
+    end
   end
 
   defp create_sync_tables! do
