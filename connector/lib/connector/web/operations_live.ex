@@ -187,7 +187,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.OperationsLive do
                 <span class="text-sm text-muted">{min}–{max}{if is_nil(default), do: " days; blank keeps records", else: ""}</span>
               </:item>
             </.list>
-            <p class="text-sm text-muted mt-3">Purging removes replay history for old requests. Running syncs and pending exchanges remain. File receipts remain until their bytes expire and cleanup succeeds. Webhook replay guards remain throughout the signing window.</p>
+            <p class="text-sm text-muted mt-3">Purging removes replay history for old requests. Running syncs, each connection's latest and latest successful sync, and pending exchanges remain. File receipts remain until their bytes expire and cleanup succeeds. Webhook replay guards remain throughout the signing window.</p>
             <.confirm_dialog :if={@pending_purge} id="people-retention-confirm"
               consequence={"Eligible connector records for #{@company.name} will be deleted."}
               detail="This cannot be undone. Each record is audited. Checkpoints, directory projections, reconciliation issues and audit history remain."

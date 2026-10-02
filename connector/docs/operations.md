@@ -43,7 +43,9 @@ can prevent recording a failure hold; the row still remains and other rows are
 attempted. Purge results never expose exception text.
 
 Eligibility is strictly older than the chosen period: sync uses `finished_at`
-and preserves all running passes; webhook deliveries/nonces use `received_at`;
+and preserves all running passes plus each connection's latest sync run and
+latest successful sync run, whatever their age, so the doctor and connections
+page keep their last-run facts; webhook deliveries/nonces use `received_at`;
 file receipts use `inserted_at`, preserve pending exchanges, and wait for the
 stored artifact expiry. File receipts are removed only after Base Artifacts
 confirms byte cleanup through its public API, outside the receipt transaction.

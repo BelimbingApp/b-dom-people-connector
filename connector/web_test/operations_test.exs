@@ -146,6 +146,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
        c do
     first = sync!(c, "old-first")
     sync!(c, "old-second")
+    sync!(c, "old-third")
     running = sync!(c, "running")
     age_runs!()
 
@@ -165,7 +166,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
 
     assert {:ok, %{deleted: [_], errors: [%{id: id}]}} = Retention.purge(c.operator, 73)
     assert id == first.id
-    assert count("people_connector_sync_runs") == 2
+    assert count("people_connector_sync_runs") == 3
     assert count("people_connector_retention_attempts") == 1
     assert {:ok, %{deleted: [], errors: []}} = Retention.purge(c.operator, 73)
     SQL.query!(Repo, "ALTER TABLE base_audit_actions DROP CONSTRAINT refuse_first_purge", [])
@@ -178,7 +179,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
 
     assert {:ok, %{deleted: [%{id: ^id}], errors: []}} = Retention.purge(c.operator, 73)
     assert count("people_connector_retention_attempts") == 0
-    assert count("people_connector_sync_runs") == 1
+    assert count("people_connector_sync_runs") == 2
     assert count("people_connector_sync_checkpoints") == 1
     assert count("people_connector_workforce_records") > 0
     {:ok, actions} = Audit.list_actions(c.operator)
@@ -186,6 +187,31 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     purges = Enum.filter(actions, &(&1.event == "people-connector.retention.purged"))
     assert length(purges) == 2
     assert Enum.all?(purges, &(&1.actor_id == 91 and &1.company_id == 73))
+  end
+
+  test "latest and latest successful sync runs survive purge so doctor keeps last sync", c do
+    sync!(c, "old-success")
+    age_runs!()
+    {:ok, _} = Retention.configure(c.operator, 73, %{sync_days: 1})
+    assert {:ok, %{deleted: [], errors: []}} = Retention.purge(c.operator, 73)
+    assert count("people_connector_sync_runs") == 1
+    assert {:ok, report} = Doctor.run(c.operator, 73)
+    assert check(report, :last_sync).state == :ok
+
+    SQL.query!(
+      Repo,
+      "UPDATE people_connector_sync_runs SET started_at = finished_at - interval '1 minute'",
+      []
+    )
+
+    SQL.query!(
+      Repo,
+      "INSERT INTO people_connector_sync_runs (tenant_id, connection_id, platform_company_id, provider_id, idempotency_key, pass, state, reason, applied, unchanged, superseded, deactivated, refused, started_at, finished_at, inserted_at, updated_at) SELECT tenant_id, connection_id, platform_company_id, provider_id, 'old-failed', pass, 'failed', 'adapter_error', 0, 0, 0, 0, 0, now() - interval '36 hours', now() - interval '36 hours', now(), now() FROM people_connector_sync_runs",
+      []
+    )
+
+    assert {:ok, %{deleted: [], errors: []}} = Retention.purge(c.operator, 73)
+    assert count("people_connector_sync_runs") == 2
   end
 
   test "webhook receipts and replay guards retain at least twice the skew; sibling rows survive",

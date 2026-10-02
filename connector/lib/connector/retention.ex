@@ -4,7 +4,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Retention do
 
   Periods are company settings, unset by default (keep records). Each eligible
   row is independently audited and purged; a failed row is held until the retry
-  interval, so it cannot starve later batches. Active sync passes and pending
+  interval, so it cannot starve later batches. Active sync passes, each
+  connection's latest sync run and latest successful sync run, and pending
   file exchanges are preserved. File receipts survive until bytes expire and
   Base Artifacts confirms cleanup. Checkpoints, projections, issues and audit
   history are never purged here. Purged idempotency history cannot deduplicate
@@ -230,7 +231,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Retention do
     case kind do
       :sync when not is_nil(policy.sync_days) ->
         cutoff = DateTime.add(now, -policy.sync_days, :day)
-        query |> where([r], r.state != :running and r.finished_at < ^cutoff)
+        latest = latest_runs(query)
+        succeeded = latest_runs(where(query, state: :succeeded))
+
+        query
+        |> where([r], r.state != :running and r.finished_at < ^cutoff)
+        |> where([r], r.id not in subquery(latest) and r.id not in subquery(succeeded))
 
       kind when kind in [:webhook, :nonce] and not is_nil(policy.webhook_days) ->
         skew =
@@ -245,6 +251,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Retention do
       _ ->
         where(query, false)
     end
+  end
+
+  defp latest_runs(query) do
+    query
+    |> distinct([r], r.connection_id)
+    |> order_by([r], asc: r.connection_id, desc: r.started_at, desc: r.id)
+    |> select([r], r.id)
   end
 
   defp connections(scope, company),
