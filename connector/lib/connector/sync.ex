@@ -20,7 +20,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   Every projection write is idempotent: a repeated or older observation
   changes nothing. A record the Connector refuses becomes a reconciliation
   issue and the pass continues. A completed bootstrap, or a pass whose every
-  page is a full snapshot, deactivates records the provider no longer lists.
+  page is a full snapshot, deactivates records the provider no longer lists;
+  positions only when their stream arrived in a single page. An unavailable
+  organisation stream leaves positions untouched, applies the directory stream
+  and opens an `organisation_unavailable` issue.
   Rows are deactivated, never deleted, and only Connector-owned tables are
   written.
   """
@@ -349,31 +352,36 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   ## Read
 
   defp read_streams(adapter, authorization, provider, pass, checkpoint, limit) do
-    directory = read_pages(adapter, authorization, pass, checkpoint, limit)
+    with {:complete, entries, as_of, resume, snapshot?, _pages} <-
+           read_pages(adapter, authorization, pass, checkpoint, limit) do
+      full = if pass == :bootstrap or snapshot?, do: [:company, :employee], else: []
 
-    if declared?(provider, :position) do
-      case directory do
-        {:complete, entries, as_of, resume, snapshot?} ->
-          case read_pages(
-                 adapter,
-                 %{authorization | capability: "organization_directory"},
-                 pass,
-                 checkpoint,
-                 limit
-               ) do
-            {:complete, positions, position_as_of, _resume, position_snapshot?} ->
-              {:complete, entries ++ positions, earliest(as_of, position_as_of), resume,
-               snapshot? and position_snapshot?}
+      if declared?(provider, :position) do
+        case read_pages(
+               adapter,
+               %{authorization | capability: "organization_directory"},
+               pass,
+               checkpoint,
+               limit
+             ) do
+          {:complete, positions, position_as_of, _resume, position_snapshot?, pages} ->
+            position_full =
+              if (pass == :bootstrap or position_snapshot?) and pages == 1,
+                do: [:position],
+                else: []
 
-            stopped ->
-              stopped
-          end
+            {:complete, entries ++ positions, earliest(as_of, position_as_of), resume,
+             full ++ position_full, :read}
 
-        stopped ->
-          stopped
+          {:unavailable, _reason} ->
+            {:complete, entries, as_of, resume, full, :unavailable}
+
+          stopped ->
+            stopped
+        end
+      else
+        {:complete, entries, as_of, resume, full, nil}
       end
-    else
-      directory
     end
   end
 
@@ -408,7 +416,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       cond do
         is_nil(page.next_cursor) ->
           entries = acc.pages |> Enum.reverse() |> Enum.concat()
-          {:complete, entries, acc.as_of, page.resume_cursor, acc.snapshot}
+          {:complete, entries, acc.as_of, page.resume_cursor, acc.snapshot, length(acc.pages)}
 
         MapSet.member?(acc.seen, page.next_cursor) ->
           {:failed, "cursor_repeated"}
@@ -494,7 +502,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
          run,
          checkpoint,
          provider,
-         {:complete, entries, as_of, resume, snapshot?}
+         {:complete, entries, as_of, resume, full, organisation}
        ) do
     connection =
       Repo.one(
@@ -512,13 +520,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         close(run, :failed, "checkpoint_moved", %{as_of_at: as_of})
 
       true ->
-        apply_pass(connection, run, provider, entries, as_of, resume, snapshot?)
+        apply_pass(connection, run, provider, entries, as_of, resume, full, organisation)
     end
   end
 
-  defp apply_pass(connection, run, provider, entries, as_of, resume, snapshot?) do
+  defp apply_pass(connection, run, provider, entries, as_of, resume, full, organisation) do
     now = DateTime.utc_now()
-    full_read? = run.pass == :bootstrap or snapshot?
 
     projections =
       Repo.all(from(p in Projection, where: p.connection_id == ^connection.id))
@@ -531,7 +538,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
     tally = state.tally
 
-    if full_read? and entries == [] do
+    if full != [] and entries == [] do
       report_issue(connection, "bootstrap:empty", now, %{
         kind: "empty_bootstrap",
         reason: "no_records",
@@ -549,10 +556,22 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
       close(run, :refused, "every_record_refused", Map.put(tally, :as_of_at, as_of))
     else
-      tally =
-        if full_read?,
-          do: deactivate_absent(state, as_of).tally,
-          else: tally
+      tally = deactivate_absent(state, as_of, full).tally
+
+      case organisation do
+        :unavailable ->
+          report_issue(connection, "organisation:unavailable", now, %{
+            kind: "organisation_unavailable",
+            reason: "provider_unavailable",
+            severity: :warning
+          })
+
+        :read ->
+          resolve_key(connection, "organisation:unavailable", now)
+
+        nil ->
+          nil
+      end
 
       version = advance_checkpoint(connection, as_of, resume)
       resolve_key(connection, "feed:refused", now)
@@ -714,10 +733,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     end
   end
 
-  defp deactivate_absent(state, as_of) do
+  defp deactivate_absent(state, as_of, kinds) do
     state.projections
-    |> Enum.filter(fn {key, projection} ->
-      projection.active and not MapSet.member?(state.seen, key)
+    |> Enum.filter(fn {{kind, _, _} = key, projection} ->
+      kind in kinds and projection.active and not MapSet.member?(state.seen, key)
     end)
     |> Enum.reduce(state, fn {key, projection}, state ->
       deactivated_at =

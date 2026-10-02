@@ -59,9 +59,12 @@ size and observation watermark; a different stream or page size is refused.
 The watermark fixes the effective day across a pass. Replaying a cursor over
 unchanged source facts returns the same page. The seam uses offset paging,
 so this is a live read, not a frozen database snapshot: concurrent position
-changes can affect later pages. A full page may be followed by an empty final
-page. Missing Organisation returns unavailable and stops synchronisation
-without advancing the checkpoint or applying any stream.
+changes can affect later pages. The Connector therefore deactivates absent
+positions only when the stream arrived in a single page; with more pages an
+ended position stays active until a pass fits in one page. A full page may be
+followed by an empty final page. Missing Organisation returns unavailable; the
+Connector still applies company and employee changes, leaves positions as they
+were and opens an `organisation_unavailable` issue.
 
 The engine reads the declared organisation stream alongside company/employees
 before applying the combined pass. Position projection identity includes kind,

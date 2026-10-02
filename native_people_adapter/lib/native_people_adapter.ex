@@ -16,7 +16,9 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapter do
 
   Organisation reads preserve bounded assignments, vacancy and parent identity
   through Workforce.positions/4. Their cursors bind tenant, company, size and
-  effective day. The public seam uses live offset paging, not a frozen snapshot.
+  effective day. The public seam uses live offset paging, not a frozen snapshot,
+  so the Connector deactivates absent positions only after a single-page read.
+  Missing Organisation is reported as an unavailable page.
 
   Every company/employee page of one pass shares the watermark minted on its first page, which
   rides in the page cursor; the cursor also records the last key emitted

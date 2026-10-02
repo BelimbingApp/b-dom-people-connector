@@ -385,6 +385,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
 
   defp issue_message(%{kind: "empty_bootstrap"}), do: "A full read returned no records."
 
+  defp issue_message(%{kind: "organisation_unavailable"}),
+    do: "Organisation was unavailable, so positions were not updated in this pass."
+
   defp issue_message(%{kind: "unknown_outcome"}),
     do: "A pass stopped without recording an outcome. Nothing from it was applied."
 

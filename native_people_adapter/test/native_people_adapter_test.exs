@@ -460,16 +460,41 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
       refute Enum.any?(remaining, &(&1.kind == :position))
     end
 
-    test "missing organisation reader stops a pass without advancing its projection", context do
-      employee!(context.scope, 73, "E-1")
+    test "a missing organisation reader keeps the directory in sync and opens an issue",
+         context do
+      Process.put(:native_test_positions, [position(9)])
       assert {:ok, %{state: :succeeded}} = sync(context, "before-missing")
       Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      employee!(context.scope, 73, "E-2")
 
-      assert {:ok, %{state: :unavailable, applied: 0, checkpoint_version: nil}} =
-               sync(context, "missing")
+      assert {:ok, %{state: :succeeded, applied: 1, deactivated: 0}} =
+               sync(context, "missing", full: true)
 
       {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
-      assert length(records) == 2
+      assert Enum.map(records, & &1.kind) |> Enum.sort() == [:company, :employee, :position]
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"organisation_unavailable", "provider_unavailable"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason})
+
+      Bilimbi.People.Workforce.register_position_reader(__MODULE__.PositionReader)
+      assert {:ok, %{state: :succeeded}} = sync(context, "restored")
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+      assert summary.open_issues == []
+    end
+
+    test "a multi-page organisation pass never deactivates absent positions", context do
+      {:ok, _} = Sync.put_policy(context.scope, 73, %{page_limit: 2})
+      Process.put(:native_test_positions, Enum.map(1..3, &position/1))
+      assert {:ok, %{state: :succeeded, applied: 4}} = sync(context, "org-paged")
+
+      Process.put(:native_test_positions, Enum.map(2..3, &position/1))
+      assert {:ok, %{state: :succeeded, deactivated: 0}} = sync(context, "org-paged-gap")
+
+      Process.put(:native_test_positions, [position(2)])
+      assert {:ok, %{state: :succeeded, deactivated: 2}} = sync(context, "org-single")
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert [%{stable_id: "2"}] = Enum.filter(records, &(&1.kind == :position))
     end
 
     test "bootstraps, projects and stays idempotent", context do

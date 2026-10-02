@@ -93,8 +93,15 @@ a change feed marks each page `snapshot: true`; when every page of a pass is a
 snapshot, a changes pass also deactivates records it no longer lists.
 
 The engine reads every page of each declared stream before applying any.
-The organisation stream is authorized separately as `organization_directory`;
-a stopped stream prevents the entire pass from being applied. Position identity
+The organisation stream is authorized separately as `organization_directory`.
+A stale or failed stream prevents the entire pass from being applied. An
+unavailable organisation stream does not: the directory stream is applied,
+positions are left as they were, and an `organisation_unavailable` warning
+issue stays open until a later pass reads the organisation stream. Absent
+positions are deactivated only when the organisation stream arrived in a
+single page, because the native seam pages by offset and a multi-page read
+can skip a live position; until keyset paging exists, a multi-page pass leaves
+an ended position active. Position identity
 includes kind, source and stable ID. Parent, version, vacancy, assignment
 completeness and holder identities are projected without writing People history.
 Migration `20261003120001` adds those projection fields.
