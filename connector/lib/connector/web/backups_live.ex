@@ -89,7 +89,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
         {:noreply, socket |> clear_flash() |> assign(preview: preview, confirming: false)}
 
       {:error, reason} ->
-        {:noreply, socket |> assign(preview: nil) |> put_flash(:error, message(reason))}
+        {:noreply,
+         socket |> assign(preview: nil) |> clear_flash() |> put_flash(:error, message(reason))}
     end
   end
 
@@ -117,8 +118,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
 
       {:ok, _} ->
         {:noreply,
-         put_flash(
-           socket,
+         socket
+         |> clear_flash()
+         |> put_flash(
            :error,
            "Recovery did not complete. Review connection health and sync outcomes."
          )}
@@ -151,16 +153,17 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.BackupsLive do
       {:noreply,
        socket
        |> refresh()
+       |> clear_flash()
        |> put_flash(
          :error,
          "Some backups could not be removed. Review private storage settings and retry."
        )}
 
   defp outcome(socket, {:ok, _}, text),
-    do: {:noreply, socket |> refresh() |> put_flash(:success, text)}
+    do: {:noreply, socket |> refresh() |> clear_flash() |> put_flash(:success, text)}
 
   defp outcome(socket, {:error, reason}, _),
-    do: {:noreply, socket |> refresh() |> put_flash(:error, message(reason))}
+    do: {:noreply, socket |> refresh() |> clear_flash() |> put_flash(:error, message(reason))}
 
   defp refresh(%{assigns: %{company: nil}} = socket),
     do: assign(socket, policy: nil, records: [], holds: [])
