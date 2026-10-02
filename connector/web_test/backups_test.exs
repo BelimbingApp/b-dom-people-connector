@@ -17,6 +17,7 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
 
   setup do
     UserFixtures.create_user_tables!()
+    Bilimbi.People.Organisation.TestFixtures.create_position_tables!()
     Fixtures.create_connection_tables!()
     Bilimbi.Base.Artifacts.TestFixtures.create_artifacts_table!()
     CompanyFixtures.insert_tenant!(%{id: 41})
@@ -42,6 +43,15 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
 
   test "private backup restores config, checkpoint and projections, excludes secrets, audits and replays once",
        c do
+    {:ok, position} = Bilimbi.People.Organisation.create_position(c.system, 73, %{code: "P-1"})
+
+    {:ok, _} =
+      Bilimbi.People.Organisation.record_version(c.system, 73, position.id, %{
+        version: 1,
+        title: "Position One",
+        effective_from: Date.utc_today()
+      })
+
     sync!(c, "before-backup")
     {:ok, initial} = Connector.sync_summary(c.operator, 73)
 
@@ -95,6 +105,11 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
              []
            ).rows == [[0]]
 
+    {:ok, %{value: projected}} = Connector.workforce(c.operator, 73)
+    restored_position = Enum.find(projected, &(&1.kind == :position))
+    assert restored_position.stable_id == to_string(position.id)
+    assert restored_position.version == 1 and restored_position.vacant
+    assert restored_position.assignments == []
     assert Settings.get("people-connector.webhook.secret", SettingsScope.company(73, 41)) == nil
 
     assert Settings.get("people-connector.webhook.enabled", SettingsScope.company(73, 41)) ==

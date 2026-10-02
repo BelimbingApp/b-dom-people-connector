@@ -9,7 +9,7 @@ write ports. Duplicate or invalid declarations are refused. A provider also
 declares whether a connection needs a credential (`:none` or `:secret`).
 `Providers.installed/0` is the catalog operators choose from: only the
 co-located native People provider (`people.native`), which reads through
-People Workforce, declares company and employee directory reads, and needs no
+People Workforce, declares company, employee and organisation directory reads, and needs no
 credential. Remote and third-party providers are not offered.
 
 ## Company axes
@@ -72,7 +72,8 @@ The write port behaviour is a neutral placeholder; no writer is activated.
 An adapter implements `ReadPort.read/2`. It receives a `PortAuthorization`
 that only the Connector builds (both company axes, provider, capability) and a
 `PortRequest` (`:bootstrap` or `:changes`, the resume cursor, the page cursor
-and the page limit), and returns a `Page` of `WorkforceRecord` values plus, on
+and the page limit), and returns a `Page` of `WorkforceRecord` values (including positions with bounded `AssignmentRecord`
+holders) plus, on
 a changes pass, `Deactivation` values. `Adapters.installed/0` maps provider
 IDs to adapter modules. A mounted adapter module (the Connector cannot depend
 on it) calls `Adapters.register/2` when its application starts and
@@ -90,6 +91,13 @@ read changes after the checkpoint's resume cursor. `full: true` bootstraps
 again and deactivates records the provider no longer lists. A provider without
 a change feed marks each page `snapshot: true`; when every page of a pass is a
 snapshot, a changes pass also deactivates records it no longer lists.
+
+The engine reads every page of each declared stream before applying any.
+The organisation stream is authorized separately as `organization_directory`;
+a stopped stream prevents the entire pass from being applied. Position identity
+includes kind, source and stable ID. Parent, version, vacancy, assignment
+completeness and holder identities are projected without writing People history.
+Migration `20261003120001` adds those projection fields.
 
 The engine reads every page before applying any. A stale or unavailable page
 (Workforce freshness vocabulary), an adapter error or exception, a repeated

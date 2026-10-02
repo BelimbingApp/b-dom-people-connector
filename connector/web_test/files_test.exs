@@ -16,6 +16,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
   setup do
     UserFixtures.create_user_tables!()
+    Bilimbi.People.Organisation.TestFixtures.create_position_tables!()
     ConnectorFixtures.create_connection_tables!()
     Bilimbi.Base.Artifacts.TestFixtures.create_artifacts_table!()
     CompanyFixtures.insert_tenant!(%{id: 41})
@@ -46,6 +47,15 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
   end
 
   test "native export round trips as a private review import; byte replay deduplicates", c do
+    {:ok, position} = Bilimbi.People.Organisation.create_position(c.scope, 73, %{code: "P-1"})
+
+    {:ok, _} =
+      Bilimbi.People.Organisation.record_version(c.scope, 73, position.id, %{
+        version: 1,
+        title: "Position One",
+        effective_from: Date.utc_today()
+      })
+
     {:ok, run} =
       Connector.synchronise(c.operator, 73, c.registry, Adapters.installed(), "file-export")
 
@@ -55,6 +65,38 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
     {:ok, %{bytes: bytes, metadata: metadata}} =
       FileExchange.download(c.operator, 73, exported.id)
+
+    document = Jason.decode!(bytes)
+    projected = Enum.find(document["records"], &(&1["kind"] == "position"))
+    assert projected["stable_id"] == to_string(position.id)
+    assert projected["vacant"] and projected["version"] == 1
+    assert projected["assignments"] == []
+
+    holder = %{
+      "source_id" => "people/native",
+      "stable_id" => "a-1",
+      "employee_stable_id" => "e-1",
+      "kind" => "acting"
+    }
+
+    for assignments <- [
+          nil,
+          false,
+          [%{}],
+          [holder, holder],
+          List.duplicate(holder, 501),
+          [Map.put(holder, "extra", "unsupported")],
+          [Map.put(holder, "source_id", "elsewhere")]
+        ] do
+      invalid = Map.put(projected, "assignments", assignments)
+
+      assert {:error, :invalid_file} =
+               FileExchange.import_file(
+                 c.operator,
+                 73,
+                 Jason.encode!(Map.put(document, "records", [invalid]))
+               )
+    end
 
     assert metadata.content_type == "application/json"
     assert DateTime.diff(metadata.expires_at, DateTime.utc_now(), :day) in 29..30

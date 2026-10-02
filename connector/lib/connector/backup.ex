@@ -16,7 +16,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
 
   @connection_fields ~w(provider_id provider_contract_version workforce_source_id workforce_company_id enabled)a
   @checkpoint_fields ~w(version resume_cursor as_of_at)a
-  @projection_fields ~w(kind source_id stable_id workforce_company_id active name code email supervisor_stable_id content_hash observed_at deactivated_at)a
+  @projection_fields ~w(kind source_id stable_id workforce_company_id active name code email supervisor_stable_id parent_stable_id version vacant assignments_incomplete assignments content_hash observed_at deactivated_at)a
   @setting_keys ~w(people-connector.sync.page_limit people-connector.sync.max_age_minutes people-connector.sync.run_timeout_minutes people-connector.files.enabled people-connector.files.json_enabled people-connector.files.max_bytes people-connector.files.max_records people-connector.files.stale_minutes people-connector.webhook.max_skew_seconds people-connector.webhook.enabled)
   @fields [
     retention_days: {"people-connector.backup.retention_days", 30, 1, 3650},
@@ -500,6 +500,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
 
           field == :kind and value == "employee" ->
             :employee
+
+          field == :kind and value == "position" ->
+            :position
+
+          field == :assignments and is_nil(value) ->
+            []
 
           true ->
             value

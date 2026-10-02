@@ -17,6 +17,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
 
   setup do
     UserFixtures.create_user_tables!()
+    Bilimbi.People.Organisation.TestFixtures.create_position_tables!()
     Fixtures.create_connection_tables!()
     Bilimbi.Base.Artifacts.TestFixtures.create_artifacts_table!()
     CompanyFixtures.insert_tenant!(%{id: 41})

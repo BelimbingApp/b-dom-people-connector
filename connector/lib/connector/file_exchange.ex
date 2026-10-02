@@ -24,6 +24,7 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     json_enabled: {"people-connector.files.json_enabled", :boolean, nil, nil},
     stale_minutes: {"people-connector.files.stale_minutes", :integer, 1, 1440}
   ]
+  @organisation_keys ~w(parent_stable_id version vacant assignments_incomplete assignments)
   @record_keys ~w(kind source_id stable_id workforce_company_id name code email supervisor_stable_id observed_at active)
   @envelope_keys ~w(format tenant_id platform_company_id workforce_source_id workforce_company_id records)
 
@@ -246,12 +247,16 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
   defp validate(_, _, _), do: {:error, :invalid_file}
 
   defp valid_record?(record, status) when is_map(record) do
-    with true <- Enum.sort(Map.keys(record)) == Enum.sort(@record_keys),
-         kind when kind in ["company", "employee"] <- record["kind"],
+    with true <- Enum.sort(Map.keys(record) -- @organisation_keys) == Enum.sort(@record_keys),
+         kind when kind in ["company", "employee", "position"] <- record["kind"],
          timestamp when is_binary(timestamp) <- record["observed_at"],
          {:ok, observed, _} <- DateTime.from_iso8601(timestamp) do
       parsed = %WorkforceRecord{
-        kind: if(kind == "company", do: :company, else: :employee),
+        kind:
+          Map.fetch!(
+            %{"company" => :company, "employee" => :employee, "position" => :position},
+            kind
+          ),
         source_id: record["source_id"],
         stable_id: record["stable_id"],
         workforce_company_id: record["workforce_company_id"],
@@ -259,6 +264,11 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
         code: record["code"],
         email: record["email"],
         supervisor_stable_id: record["supervisor_stable_id"],
+        parent_stable_id: record["parent_stable_id"],
+        version: record["version"],
+        vacant: record["vacant"],
+        assignments_incomplete: record["assignments_incomplete"],
+        assignments: parse_assignments(Map.get(record, "assignments", [])),
         observed_at: observed,
         active: record["active"]
       }
@@ -272,9 +282,35 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
 
   defp valid_record?(_, _), do: false
 
+  defp parse_assignments(values) when is_list(values) and length(values) <= 500 do
+    Enum.map(values, fn
+      value when is_map(value) ->
+        if Enum.sort(Map.keys(value)) == ~w(employee_stable_id kind source_id stable_id),
+          do: Bilimbi.PeopleConnector.Connector.AssignmentRecord.from_map(value),
+          else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp parse_assignments(_), do: nil
+
   defp encode_record(record) do
     record
     |> Map.from_struct()
+    |> then(fn fields ->
+      if record.kind == :position,
+        do: fields,
+        else:
+          Map.drop(fields, [
+            :parent_stable_id,
+            :version,
+            :vacant,
+            :assignments_incomplete,
+            :assignments
+          ])
+    end)
     |> Map.update!(:kind, &Atom.to_string/1)
     |> Map.update!(:observed_at, &DateTime.to_iso8601/1)
   end

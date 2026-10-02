@@ -21,9 +21,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Providers do
   def installed do
     {:ok, company} = Capability.new("company_directory", :read)
     {:ok, employees} = Capability.new("employee_directory", :read)
+    {:ok, organisation} = Capability.new("organization_directory", :read)
 
     {:ok, native} =
-      Provider.new(@native_id, "People (this installation)", "1.0.0", [company, employees])
+      Provider.new(@native_id, "People (this installation)", "1.0.0", [
+        company,
+        employees,
+        organisation
+      ])
 
     {:ok, registry} = Registry.register(Registry.new(), native)
     registry

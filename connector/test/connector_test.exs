@@ -231,6 +231,12 @@ defmodule Bilimbi.PeopleConnector.ConnectorTest do
     assert [provider] = Registry.providers(Providers.installed())
     assert provider.id == Providers.native_id()
     assert provider.credential == :none
+
+    assert Enum.any?(
+             provider.capabilities,
+             &(&1.key == "organization_directory" and &1.direction == :read)
+           )
+
     assert Enum.all?(provider.capabilities, &(&1.direction == :read))
   end
 end

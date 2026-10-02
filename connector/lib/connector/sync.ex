@@ -33,6 +33,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   alias Bilimbi.Base.Tenancy
   alias Bilimbi.Base.Tenancy.Scope
   alias Bilimbi.People.Workforce.ReadResult
+  alias Bilimbi.PeopleConnector.Connector.AssignmentRecord
   alias Bilimbi.PeopleConnector.Connector.Connection
   alias Bilimbi.PeopleConnector.Connector.Deactivation
   alias Bilimbi.PeopleConnector.Connector.Page
@@ -165,7 +166,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
           capability: @stream_capability
         }
 
-        outcome = read_pages(adapter, authorization, run.pass, checkpoint, policy.page_limit)
+        outcome =
+          read_streams(adapter, authorization, provider, run.pass, checkpoint, policy.page_limit)
+
         finish(scope, run, checkpoint, provider, outcome)
 
       {:error, _reason} = error ->
@@ -344,6 +347,35 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   end
 
   ## Read
+
+  defp read_streams(adapter, authorization, provider, pass, checkpoint, limit) do
+    directory = read_pages(adapter, authorization, pass, checkpoint, limit)
+
+    if declared?(provider, :position) do
+      case directory do
+        {:complete, entries, as_of, resume, snapshot?} ->
+          case read_pages(
+                 adapter,
+                 %{authorization | capability: "organization_directory"},
+                 pass,
+                 checkpoint,
+                 limit
+               ) do
+            {:complete, positions, position_as_of, _resume, position_snapshot?} ->
+              {:complete, entries ++ positions, earliest(as_of, position_as_of), resume,
+               snapshot? and position_snapshot?}
+
+            stopped ->
+              stopped
+          end
+
+        stopped ->
+          stopped
+      end
+    else
+      directory
+    end
+  end
 
   defp read_pages(adapter, authorization, pass, checkpoint, limit) do
     request = %PortRequest{
@@ -575,7 +607,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   defp classify(_entry, _connection, _provider), do: {:refuse, "invalid_record", nil}
 
   defp identity(%{kind: kind, source_id: source_id, stable_id: stable_id})
-       when kind in [:company, :employee] do
+       when kind in [:company, :employee, :position] do
     if WorkforceRecord.identifier?(source_id) and WorkforceRecord.identifier?(stable_id),
       do: {kind, source_id, stable_id},
       else: nil
@@ -706,6 +738,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         code: projection.code,
         email: projection.email,
         supervisor_stable_id: projection.supervisor_stable_id,
+        parent_stable_id: projection.parent_stable_id,
+        version: projection.version,
+        vacant: projection.vacant,
+        assignments_incomplete: projection.assignments_incomplete,
+        assignments: Enum.map(projection.assignments, &AssignmentRecord.from_map/1),
         active: false
       })
 
@@ -727,6 +764,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       code: record.code,
       email: record.email,
       supervisor_stable_id: record.supervisor_stable_id,
+      parent_stable_id: record.parent_stable_id,
+      version: record.version,
+      vacant: record.vacant,
+      assignments_incomplete: record.assignments_incomplete,
+      assignments: Enum.map(record.assignments, &Map.from_struct/1),
       content_hash: hash,
       observed_at: record.observed_at,
       deactivated_at: if(record.active, do: nil, else: record.observed_at)
@@ -735,7 +777,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   defp content_hash(record) do
     {record.workforce_company_id, record.name, record.code, record.email,
-     record.supervisor_stable_id, record.active}
+     record.supervisor_stable_id, record.active, record.parent_stable_id, record.version,
+     record.vacant, record.assignments_incomplete,
+     Enum.sort_by(record.assignments, & &1.stable_id)}
     |> :erlang.term_to_binary([:deterministic])
     |> then(&:crypto.hash(:sha256, &1))
     |> Base.encode16(case: :lower)
@@ -895,6 +939,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         code: projection.code,
         email: projection.email,
         supervisor_stable_id: projection.supervisor_stable_id,
+        parent_stable_id: projection.parent_stable_id,
+        version: projection.version,
+        vacant: projection.vacant,
+        assignments_incomplete: projection.assignments_incomplete,
+        assignments: Enum.map(projection.assignments, &AssignmentRecord.from_map/1),
         observed_at: projection.observed_at,
         active: true
       }

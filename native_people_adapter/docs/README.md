@@ -10,22 +10,26 @@ refusing passes with `:adapter_unavailable`.
 
 ## What it serves
 
-Only what the provider declares in `Connector.Providers`: `company_directory`
-and `employee_directory` reads. The Connector runs one directory stream under
+Only what the provider declares in `Connector.Providers`: `company_directory`,
+`employee_directory` and `organization_directory` reads. The Connector runs
+the company/employee stream under
 the `employee_directory` authorization, and the adapter returns the company
 first and then its employees as `WorkforceRecord` values. Employee records carry
 the People employee number, display name, email and supervisor reference, never
 a login actor or People business history. There is no writer, single sign-on,
-organisation or manager-hierarchy read, or remote transport, and nothing is
-declared for them.
+manager-hierarchy read or remote transport. Organisation reads use
+`Workforce.positions/4`, with positions, parent references, current version,
+vacancy and at most 500 assignment facts per position. Assignment identities
+and employee references stay distinct; they carry no login actor. The public
+seam flags incomplete assignment lists, and the Connector preserves that flag.
 
 ## Scope and refusal
 
 The adapter trusts only the `PortAuthorization` the Connector issues. It refuses
 with a fixed atom, never People text, an authorization that:
 
-- names another provider, a capability other than `employee_directory`, or a
-  direction other than read (`:invalid_authorization`);
+- names another provider, a capability other than `employee_directory` or
+  `organization_directory`, or a direction other than read (`:invalid_authorization`);
 - names a workforce source other than `people/native`, or a workforce company
   that differs from the platform company (native identity maps one to one);
 - is not a valid page request or cursor (`:invalid_request`, `:invalid_cursor`).
@@ -48,3 +52,17 @@ during a pass. A `:changes` pass returns the same full snapshot as a
 `:bootstrap` pass, and every page is marked `snapshot: true`, so any
 synchronisation deactivates an employee who has left. Each page rereads
 Workforce, so a pass over many pages costs one read per page.
+
+Organisation pages use the Workforce seam's bounded paging (at most 100
+positions per page). Their cursor binds the tenant, platform company, page
+size and observation watermark; a different stream or page size is refused.
+The watermark fixes the effective day across a pass. Replaying a cursor over
+unchanged source facts returns the same page. The seam uses offset paging,
+so this is a live read, not a frozen database snapshot: concurrent position
+changes can affect later pages. A full page may be followed by an empty final
+page. Missing Organisation returns unavailable and stops synchronisation
+without advancing the checkpoint or applying any stream.
+
+The engine reads the declared organisation stream alongside company/employees
+before applying the combined pass. Position projection identity includes kind,
+source and stable ID, so equal employee and position IDs never collide.
