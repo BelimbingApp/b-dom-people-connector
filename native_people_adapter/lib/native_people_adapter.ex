@@ -236,23 +236,17 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapter do
          _ ->
            false
        end) do
-      records = Enum.map(positions, &position_record(&1, as_of))
-
-      if Enum.all?(records, &WorkforceRecord.valid?/1) do
-        {:ok,
-         %Page{
-           entries: records,
-           as_of: as_of,
-           snapshot: true,
-           resume_cursor: DateTime.to_iso8601(as_of),
-           next_cursor:
-             if(length(positions) == size,
-               do: organisation_cursor(authorization, as_of, page_number + 1, size)
-             )
-         }}
-      else
-        {:error, :unexpected_result}
-      end
+      {:ok,
+       %Page{
+         entries: Enum.map(positions, &position_record(&1, as_of)),
+         as_of: as_of,
+         snapshot: true,
+         resume_cursor: DateTime.to_iso8601(as_of),
+         next_cursor:
+           if(length(positions) == size,
+             do: organisation_cursor(authorization, as_of, page_number + 1, size)
+           )
+       }}
     else
       {:error, :mapping_mismatch}
     end

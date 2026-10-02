@@ -12,8 +12,9 @@ co-located native People provider (`people.native`), which reads through
 People Workforce, declares company and employee directory reads, and needs no
 credential. It declares organisation directory reads only while
 `Workforce.positions_available?/0` reports a registered position reader, so a
-host without People Organisation never reads or warns about positions. Remote
-and third-party providers are not offered.
+host without People Organisation never reads positions and, unless the
+connection still holds active positions from earlier passes, never warns about
+them. Remote and third-party providers are not offered.
 
 ## Company axes
 
@@ -98,10 +99,12 @@ snapshot, a changes pass also deactivates records it no longer lists.
 The engine reads every page of each declared stream before applying any.
 The organisation stream is authorized separately as `organization_directory`.
 A stale or failed stream prevents the entire pass from being applied. An
-organisation stream that becomes unavailable after the provider declared it
-does not: the directory stream is applied,
-positions are left as they were, and an `organisation_unavailable` warning
-issue stays open until a later pass reads the organisation stream. Absent
+unavailable organisation stream does not, nor does a provider that stops
+declaring it while the connection still holds active positions: the directory
+stream is applied, positions are left as they were, and an
+`organisation_unavailable` warning issue stays open until a later pass reads
+the organisation stream or no active position remains. A malformed position is
+refused on its own, like any other record. Absent
 positions are deactivated only when the organisation stream arrived in a
 single page, because the native seam pages by offset and a multi-page read
 can skip a live position; until keyset paging exists, a multi-page pass leaves

@@ -476,6 +476,40 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
       assert summary.open_issues == []
     end
 
+    test "positions kept after the organisation stream is withdrawn open an issue", context do
+      Process.put(:native_test_positions, [position(9)])
+      assert {:ok, %{state: :succeeded}} = sync(context, "with-reader")
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      {:ok, provider} = Registry.fetch(Providers.installed(), "people.native")
+
+      assert {:ok, %{state: :succeeded, deactivated: 0}} =
+               sync(%{context | provider: provider}, "withdrawn", full: true)
+
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert Enum.any?(records, &(&1.kind == :position and &1.stable_id == "9"))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"organisation_unavailable", "provider_unavailable"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason})
+    end
+
+    test "a malformed position is refused alone and the pass still applies", context do
+      employee!(context.scope, 73, "E-1")
+
+      Process.put(:native_test_positions, [
+        position(1),
+        position(2, %{title: String.duplicate("x", 256)})
+      ])
+
+      assert {:ok, %{state: :succeeded, applied: 3, refused: 1}} = sync(context, "bad-position")
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert [%{stable_id: "1"}] = Enum.filter(records, &(&1.kind == :position))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"record_refused", "invalid_record", "position", "2"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason, &1.record_kind, &1.stable_id})
+    end
+
     test "a missing organisation reader keeps the directory in sync and opens an issue",
          context do
       Process.put(:native_test_positions, [position(9)])

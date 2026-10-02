@@ -64,11 +64,13 @@ so this is a live read, not a frozen database snapshot: concurrent position
 changes can affect later pages. The Connector therefore deactivates absent
 positions only when the stream arrived in a single page; with more pages an
 ended position stays active until a pass fits in one page. A full page may be
-followed by an empty final page. Without People Organisation the provider does
-not declare the organisation stream, so no position is read and no issue is
-opened. If the reader disappears after the stream was declared, the adapter
-returns unavailable; the Connector still applies company and employee changes,
-leaves positions as they were and opens an `organisation_unavailable` issue.
+followed by an empty final page. Position records are passed on as read, so
+the Connector refuses a malformed one on its own without stopping the pass.
+Without People Organisation the provider does not declare the organisation
+stream, so no position is read. If positions were synchronised before the
+reader disappeared, or the adapter finds it gone mid-pass, the Connector still
+applies company and employee changes, leaves positions as they were and opens
+an `organisation_unavailable` issue; otherwise no issue is opened.
 
 The engine reads the declared organisation stream alongside company/employees
 before applying the combined pass. Position projection identity includes kind,

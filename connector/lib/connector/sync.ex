@@ -22,8 +22,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   issue and the pass continues. A completed bootstrap, or a pass whose every
   page is a full snapshot, deactivates records the provider no longer lists;
   positions only when their stream arrived in a single page. An unavailable
-  organisation stream leaves positions untouched, applies the directory stream
-  and opens an `organisation_unavailable` issue.
+  organisation stream, or an undeclared one while active positions remain,
+  leaves positions untouched, applies the directory stream and opens an
+  `organisation_unavailable` issue.
   Rows are deactivated, never deleted, and only Connector-owned tables are
   written.
   """
@@ -558,20 +559,21 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     else
       tally = deactivate_absent(state, as_of, full).tally
 
-      case organisation do
-        :unavailable ->
+      stale_positions? =
+        organisation == :unavailable or
+          (is_nil(organisation) and
+             Enum.any?(projections, fn {{kind, _, _}, projection} ->
+               kind == :position and projection.active
+             end))
+
+      if stale_positions?,
+        do:
           report_issue(connection, "organisation:unavailable", now, %{
             kind: "organisation_unavailable",
             reason: "provider_unavailable",
             severity: :warning
-          })
-
-        :read ->
-          resolve_key(connection, "organisation:unavailable", now)
-
-        nil ->
-          nil
-      end
+          }),
+        else: resolve_key(connection, "organisation:unavailable", now)
 
       version = advance_checkpoint(connection, as_of, resume)
       resolve_key(connection, "feed:refused", now)
