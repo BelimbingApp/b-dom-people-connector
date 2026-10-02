@@ -32,6 +32,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Contributions do
             minimum: 1,
             maximum: 100_000
           },
+          "people-connector.files.stale_minutes" => %{
+            type: :integer,
+            scopes: [:company],
+            default: 15,
+            minimum: 1,
+            maximum: 1440
+          },
           # Written only through the Connector facade and its connections page,
           # so it is not editable on the generic settings screen and has no
           # reveal path.

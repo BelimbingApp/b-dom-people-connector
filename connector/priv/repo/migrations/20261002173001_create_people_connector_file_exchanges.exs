@@ -16,6 +16,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.CreateFileExchanges do
       add(:state, :string, size: 10, null: false)
       # Base exposes an opaque artifact ID; its metadata/storage schema stays private.
       add(:artifact_id, :uuid)
+      # Copied from Base at creation; Base never extends an artifact's expiry.
+      add(:expires_at, :utc_datetime_usec)
+      add(:failure_reason, :string, size: 20)
       timestamps(type: :utc_datetime_usec)
     end
 
@@ -23,16 +26,19 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.CreateFileExchanges do
       unique_index(
         :people_connector_file_exchanges,
         [:connection_id, :direction, :sha256],
-        name: :people_connector_file_exchanges_replay_unique
+        name: :people_connector_file_exchanges_pending_unique,
+        where: "state = 'pending'"
       )
     )
+
+    create(index(:people_connector_file_exchanges, [:connection_id, :direction, :sha256]))
 
     create(index(:people_connector_file_exchanges, [:tenant_id, :platform_company_id]))
 
     create(
       constraint(:people_connector_file_exchanges, :people_connector_file_exchange_values,
         check:
-          "direction IN ('import', 'export') AND state IN ('pending', 'ready', 'failed') AND record_count >= 0 AND workforce_company_id > 0 AND (state <> 'ready' OR artifact_id IS NOT NULL)"
+          "direction IN ('import', 'export') AND state IN ('pending', 'ready', 'failed') AND record_count >= 0 AND workforce_company_id > 0 AND (state <> 'ready' OR (artifact_id IS NOT NULL AND expires_at IS NOT NULL)) AND (failure_reason IS NULL OR (state = 'failed' AND failure_reason = 'stale'))"
       )
     )
   end

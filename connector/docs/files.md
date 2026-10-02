@@ -30,6 +30,7 @@ Company settings (all editable on the file page):
 | `people-connector.files.json_enabled` | Directory JSON permitted when exchange is enabled |
 | `people-connector.files.max_bytes` | 1 MiB, bounded to 10 MiB |
 | `people-connector.files.max_records` | 1000, bounded to 100000 |
+| `people-connector.files.stale_minutes` | 15, bounded to 1440 |
 
 Base Artifacts also applies its installation byte limit. Configure its private
 storage root and required retention days through **Operator Settings**, using
@@ -48,14 +49,21 @@ managers may purge owned expired bytes even after disconnect/remapping; they
 cannot download the previous mapping's files. Connection removal leaves receipts
 and Base's retention lifecycle in place, with an empty connection reference. Recreating a connection does not reopen its predecessor’s files.
 
-SHA-256 of exact bytes plus connection and direction is the durable replay key.
-Identical re-import/export returns the recorded receipt, without extending
-retention or creating another artifact. Semantically equivalent JSON with different
-bytes is a different file. Failed storage/publication can retry the same receipt.
-A pending operation refuses a concurrent retry; an interrupted process can leave
-a pending receipt for operator investigation (automatic recovery is outside this
-slice). Interrupted or unpublished artifact bytes remain tracked by Base's
-reservation/tombstone retention, never by an untracked filesystem copy.
+SHA-256 of exact bytes plus connection and direction is the replay key.
+While the recorded artifact is unexpired, identical re-import/export returns
+that receipt without extending retention or creating another artifact. Once it
+has expired (or been purged), the same bytes create a new receipt and artifact
+with fresh retention; the expired receipt stays in history marked **Expired**,
+without a download link. Semantically equivalent JSON with different bytes is a
+different file. Failed storage/publication can retry the same receipt. A pending
+operation refuses a concurrent retry. A pending receipt not updated within the
+company's stale timeout is treated as abandoned: the next exchange of the same
+bytes marks it failed with reason `stale`, audits
+`people-connector.files.stale`, and proceeds with a new receipt. The history
+shows in-progress receipts as **In progress** and abandoned ones as
+**Abandoned**; a late publication of an abandoned receipt is refused and its
+bytes are deleted. Interrupted or unpublished artifact bytes remain tracked by
+Base's reservation/tombstone retention, never by an untracked filesystem copy.
 
 The owner adapter is selected by server code. Downloads authenticate through the
 host, require connection management, and return an attachment with private/no-store

@@ -39,13 +39,25 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
         connection_id bigint REFERENCES people_connector_connections(id) ON DELETE SET NULL,
         workforce_source_id varchar(100) NOT NULL, workforce_company_id bigint NOT NULL,
         direction varchar(10) NOT NULL, sha256 varchar(64) NOT NULL, record_count integer NOT NULL,
-        state varchar(10) NOT NULL, artifact_id uuid,
+        state varchar(10) NOT NULL, artifact_id uuid, expires_at timestamp(6),
+        failure_reason varchar(20),
         inserted_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL,
-        CONSTRAINT people_connector_file_exchanges_replay_unique UNIQUE (connection_id, direction, sha256),
         CONSTRAINT people_connector_file_exchange_values CHECK (
           direction IN ('import', 'export') AND state IN ('pending', 'ready', 'failed') AND
-          record_count >= 0 AND workforce_company_id > 0 AND (state <> 'ready' OR artifact_id IS NOT NULL))
+          record_count >= 0 AND workforce_company_id > 0 AND
+          (state <> 'ready' OR (artifact_id IS NOT NULL AND expires_at IS NOT NULL)) AND
+          (failure_reason IS NULL OR (state = 'failed' AND failure_reason = 'stale')))
       ) ON COMMIT PRESERVE ROWS
+      """,
+      []
+    )
+
+    SQL.query!(
+      Repo,
+      """
+      CREATE UNIQUE INDEX IF NOT EXISTS people_connector_file_exchanges_pending_unique
+        ON people_connector_file_exchanges (connection_id, direction, sha256)
+        WHERE state = 'pending'
       """,
       []
     )

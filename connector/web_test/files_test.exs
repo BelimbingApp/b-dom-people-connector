@@ -106,6 +106,8 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
           %{enabled: false, max_bytes: 0},
           %{max_bytes: 10_485_761},
           %{max_records: 100_001},
+          %{stale_minutes: 0},
+          %{stale_minutes: 1441},
           %{json_enabled: "true"},
           %{unknown: true},
           %{"enabled" => true}
@@ -253,6 +255,83 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
     SQL.query!(Repo, "ALTER TABLE base_audit_actions DROP CONSTRAINT files_audit_unavailable", [])
     assert {:ok, %{replayed?: false}} = FileExchange.import_file(c.operator, 73, file())
     assert count("people_connector_file_exchanges") == 1
+  end
+
+  test "an expired export is re-exported with fresh retention; history marks it expired", c do
+    {:ok, run} =
+      Connector.synchronise(c.operator, 73, c.registry, Adapters.installed(), "file-expiry")
+
+    assert run.state == :succeeded
+    {:ok, first} = FileExchange.export_file(c.operator, 73)
+    expire!()
+
+    assert {:ok, %{id: second_id, replayed?: false, state: :ready}} =
+             FileExchange.export_file(c.operator, 73)
+
+    refute second_id == first.id
+    assert {:ok, %{bytes: _}} = FileExchange.download(c.operator, 73, second_id)
+    assert {:error, _} = FileExchange.download(c.operator, 73, first.id)
+
+    assert {:ok, %{id: ^second_id, replayed?: true}} = FileExchange.export_file(c.operator, 73)
+    assert count("people_connector_file_exchanges") == 2
+    assert count("base_artifacts") == 2
+
+    assert {:ok, %{records: records}} = FileExchange.summary(c.operator, 73)
+    assert Enum.find(records, &(&1.id == first.id)).state == :expired
+
+    {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/files")
+    assert has_element?(view, "#people-files-history", "Expired")
+    assert has_element?(view, ~s(a[href="/integrations/people/files/73/#{second_id}"]))
+    refute has_element?(view, ~s(a[href="/integrations/people/files/73/#{first.id}"]))
+  end
+
+  test "a stale pending receipt is abandoned, audited and stops blocking its bytes", c do
+    :ok = Settings.delete("artifacts.retention_days")
+    assert {:error, _} = FileExchange.import_file(c.operator, 73, file())
+    {:ok, _} = Settings.put("artifacts.retention_days", 30)
+    SQL.query!(Repo, "UPDATE people_connector_file_exchanges SET state = 'pending'", [])
+
+    assert {:error, :file_exchange_in_progress} =
+             FileExchange.import_file(c.operator, 73, file())
+
+    {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/files")
+    assert has_element?(view, "#people-files-history", "In progress")
+
+    {:ok, _} = FileExchange.configure(c.operator, 73, %{stale_minutes: 5})
+
+    SQL.query!(
+      Repo,
+      "UPDATE people_connector_file_exchanges SET updated_at = now() - interval '6 minutes'",
+      []
+    )
+
+    assert {:ok, %{records: [%{id: stale_id, state: :stale}]}} =
+             FileExchange.summary(c.operator, 73)
+
+    {:ok, view, _} = c.conn |> log_in_as() |> live("/integrations/people/files")
+    assert has_element?(view, "#people-files-history", "Abandoned")
+
+    assert {:ok, %{id: new_id, replayed?: false, state: :ready}} =
+             FileExchange.import_file(c.operator, 73, file())
+
+    refute new_id == stale_id
+
+    assert %{rows: [["failed", "stale"]]} =
+             SQL.query!(
+               Repo,
+               "SELECT state, failure_reason FROM people_connector_file_exchanges WHERE id = $1",
+               [Ecto.UUID.dump!(stale_id)]
+             )
+
+    {:ok, actions} = Audit.list_actions(c.operator)
+    assert Enum.any?(actions, &(&1.event == "people-connector.files.stale"))
+    assert count("people_connector_file_exchanges") == 2
+  end
+
+  defp expire! do
+    for table <- ["base_artifacts", "people_connector_file_exchanges"] do
+      SQL.query!(Repo, "UPDATE #{table} SET expires_at = now() - interval '1 second'", [])
+    end
   end
 
   defp file do

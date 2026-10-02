@@ -60,12 +60,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.FilesLive do
 
   def handle_event("save_policy", %{"policy" => params}, socket) do
     with {bytes, ""} <- Integer.parse(params["max_bytes"] || ""),
-         {records, ""} <- Integer.parse(params["max_records"] || "") do
+         {records, ""} <- Integer.parse(params["max_records"] || ""),
+         {stale, ""} <- Integer.parse(params["stale_minutes"] || "") do
       FileExchange.configure(socket.assigns.current_scope.scope, socket.assigns.company.id, %{
         enabled: params["enabled"] == "true",
         json_enabled: params["json_enabled"] == "true",
         max_bytes: bytes,
-        max_records: records
+        max_records: records,
+        stale_minutes: stale
       })
       |> outcome(socket, "File policy saved.")
     else
@@ -171,6 +173,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.FilesLive do
             <.input field={@policy_form[:json_enabled]} type="select" label="Directory JSON format" options={[{"Disabled", "false"}, {"Enabled", "true"}]} />
             <.input field={@policy_form[:max_bytes]} type="number" label="Maximum file bytes" min="1" max="10485760" required />
             <.input field={@policy_form[:max_records]} type="number" label="Maximum directory records" min="1" max="100000" required />
+            <.input field={@policy_form[:stale_minutes]} type="number" label="Abandon in-progress exchanges after (minutes)" min="1" max="1440" required />
             <.button type="submit" id="people-files-save" phx-disable-with="Saving…">Save file policy</.button>
           </.form>
           <form id="people-files-import" phx-submit="import" phx-change="validate">
@@ -207,6 +210,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.FilesLive do
   defp exchange_state(:ready), do: "Completed"
   defp exchange_state(:pending), do: "In progress"
   defp exchange_state(:failed), do: "Failed"
+  defp exchange_state(:stale), do: "Abandoned"
+  defp exchange_state(:expired), do: "Expired"
 
   defp upload_message(:too_large), do: "File exceeds the upload limit."
   defp upload_message(:not_accepted), do: "Choose a JSON file."

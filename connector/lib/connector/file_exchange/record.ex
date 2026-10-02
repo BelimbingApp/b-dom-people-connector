@@ -14,6 +14,8 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange.Record do
     field(:record_count, :integer)
     field(:state, Ecto.Enum, values: [:pending, :ready, :failed])
     field(:artifact_id, :binary_id)
+    field(:expires_at, :utc_datetime_usec)
+    field(:failure_reason, :string)
     timestamps(type: :utc_datetime_usec)
   end
 end

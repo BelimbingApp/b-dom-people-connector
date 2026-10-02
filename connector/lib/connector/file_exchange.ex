@@ -21,7 +21,8 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     enabled: {"people-connector.files.enabled", :boolean, nil, nil},
     max_bytes: {"people-connector.files.max_bytes", :integer, 1, 10_485_760},
     max_records: {"people-connector.files.max_records", :integer, 1, 100_000},
-    json_enabled: {"people-connector.files.json_enabled", :boolean, nil, nil}
+    json_enabled: {"people-connector.files.json_enabled", :boolean, nil, nil},
+    stale_minutes: {"people-connector.files.stale_minutes", :integer, 1, 1440}
   ]
   @record_keys ~w(kind source_id stable_id workforce_company_id name code email supervisor_stable_id observed_at active)
   @envelope_keys ~w(format tenant_id platform_company_id workforce_source_id workforce_company_id records)
@@ -33,13 +34,16 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
 
   def summary(scope, company) do
     with :ok <- authorize(scope, company) do
+      policy = policy(scope, company)
+      stale_before = stale_before(policy)
+
       records =
         query(scope, company)
         |> order_by(desc: :inserted_at, desc: :id)
         |> limit(20)
         |> Repo.all()
 
-      {:ok, %{policy: policy(scope, company), records: Enum.map(records, &present/1)}}
+      {:ok, %{policy: policy, records: Enum.map(records, &present(&1, stale_before))}}
     end
   end
 
@@ -288,29 +292,31 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
   defp reserve(scope, status, direction, hash, count) do
     Repo.transaction(fn ->
       connection = lock_connection!(scope, status)
+      stale_before = stale_before(policy(scope, status.platform_company_id))
 
-      existing =
+      rows =
         query(scope, status.platform_company_id)
         |> where(
           [r],
           r.connection_id == ^connection.id and r.direction == ^direction and r.sha256 == ^hash
         )
-        |> Repo.one()
+        |> Repo.all()
+        |> Enum.map(&abandon_stale!(scope, &1, stale_before))
 
-      case existing do
-        %Record{state: :ready} = row ->
+      cond do
+        row = Enum.find(rows, &readable?/1) ->
           audit!(scope, status.platform_company_id, "people-connector.files.replay", %{
             exchange_id: row.id
           })
 
           {:existing, row}
 
-        %Record{state: :pending} ->
+        Enum.any?(rows, &(&1.state == :pending)) ->
           Repo.rollback(:file_exchange_in_progress)
 
-        row ->
+        true ->
           row =
-            row ||
+            Enum.find(rows, &(&1.state == :failed and is_nil(&1.failure_reason))) ||
               %Record{
                 tenant_id: Scope.tenant_id(scope),
                 platform_company_id: status.platform_company_id,
@@ -328,6 +334,32 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     end)
   end
 
+  defp abandon_stale!(scope, %Record{state: :pending} = row, stale_before) do
+    if stale?(row, stale_before) do
+      audit!(scope, row.platform_company_id, "people-connector.files.stale", %{
+        exchange_id: row.id
+      })
+
+      row
+      |> Ecto.Changeset.change(state: :failed, failure_reason: "stale")
+      |> Repo.update!()
+    else
+      row
+    end
+  end
+
+  defp abandon_stale!(_, row, _), do: row
+
+  defp stale_before(policy),
+    do: DateTime.add(DateTime.utc_now(), -policy.stale_minutes, :minute)
+
+  defp stale?(row, stale_before), do: DateTime.compare(row.updated_at, stale_before) == :lt
+
+  defp readable?(%Record{state: :ready, expires_at: %DateTime{} = expires_at}),
+    do: DateTime.compare(expires_at, DateTime.utc_now()) == :gt
+
+  defp readable?(_), do: false
+
   defp publish(scope, status, row, bytes) do
     # Artifacts must commit reservations/tombstones outside the receipt transaction.
     case Artifacts.put(
@@ -344,6 +376,15 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
             connection = lock_connection!(scope, status)
             if connection.id != row.connection_id, do: Repo.rollback(:connection_changed)
 
+            pending =
+              from(r in Record,
+                where: r.id == ^row.id and r.state == :pending,
+                lock: "FOR UPDATE"
+              )
+              |> Repo.one()
+
+            if is_nil(pending), do: Repo.rollback(:file_exchange_abandoned)
+
             audit!(
               scope,
               status.platform_company_id,
@@ -351,8 +392,12 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
               %{exchange_id: row.id, artifact_id: artifact.id, record_count: row.record_count}
             )
 
-            row
-            |> Ecto.Changeset.change(state: :ready, artifact_id: artifact.id)
+            pending
+            |> Ecto.Changeset.change(
+              state: :ready,
+              artifact_id: artifact.id,
+              expires_at: artifact.expires_at
+            )
             |> Repo.update!()
           end)
 
@@ -372,7 +417,10 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     end
   end
 
-  defp fail(row), do: row |> Ecto.Changeset.change(state: :failed) |> Repo.update!()
+  defp fail(row) do
+    from(r in Record, where: r.id == ^row.id and r.state == :pending)
+    |> Repo.update_all(set: [state: :failed, updated_at: DateTime.utc_now()])
+  end
 
   defp lock_connection!(scope, status) do
     with {:ok, current} <- gate(scope, status.platform_company_id),
@@ -422,8 +470,21 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
     end
   end
 
-  defp present(row),
-    do: Map.take(row, [:id, :direction, :record_count, :state, :inserted_at, :artifact_id])
+  defp present(row, stale_before \\ nil) do
+    row
+    |> Map.take([:id, :direction, :record_count, :inserted_at, :artifact_id])
+    |> Map.put(:state, present_state(row, stale_before))
+  end
+
+  defp present_state(%Record{state: :ready} = row, _),
+    do: if(readable?(row), do: :ready, else: :expired)
+
+  defp present_state(%Record{state: :failed, failure_reason: "stale"}, _), do: :stale
+
+  defp present_state(%Record{state: :pending} = row, %DateTime{} = stale_before),
+    do: if(stale?(row, stale_before), do: :stale, else: :pending)
+
+  defp present_state(row, _), do: row.state
 
   defp audit!(scope, company, event, payload) do
     actor = Scope.actor(scope)
