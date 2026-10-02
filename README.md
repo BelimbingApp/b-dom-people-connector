@@ -15,8 +15,9 @@ It does not build as a standalone Mix project.
 The Connector module has provider-neutral contracts, a capability registry,
 company connection storage with an operator page, and a synchronisation engine
 with checkpoints, idempotent runs, projections and reconciliation issues. Only
-the co-located native People provider can be chosen; it needs no provider credential. Native inbound notifications use a separate encrypted
-company signing secret and operator-controlled intake; see
+the co-located native People provider can be chosen; it needs no provider
+credential. Native inbound notifications use a separate encrypted company
+signing secret and operator-controlled intake; see
 [the webhook contract](connector/docs/webhooks.md).
 The native adapter serves the native provider's directory reads; without it
 mounted, synchronisation is refused, and there is no transport. Its tables are fresh
