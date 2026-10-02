@@ -28,6 +28,22 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
     create_sync_tables!()
     create_webhook_tables!()
     create_file_tables!()
+    create_retention_tables!()
+  end
+
+  defp create_retention_tables! do
+    SQL.query!(
+      Repo,
+      """
+      CREATE TEMPORARY TABLE IF NOT EXISTS people_connector_retention_attempts (
+        id bigserial PRIMARY KEY, tenant_id bigint NOT NULL, platform_company_id bigint NOT NULL,
+        kind varchar(10) NOT NULL CHECK (kind IN ('sync', 'webhook', 'nonce', 'file')),
+        record_id varchar(36) NOT NULL, attempted_at timestamp(6) NOT NULL,
+        CONSTRAINT people_connector_retention_attempts_identity UNIQUE (platform_company_id, kind, record_id)
+      ) ON COMMIT PRESERVE ROWS
+      """,
+      []
+    )
   end
 
   defp create_file_tables! do

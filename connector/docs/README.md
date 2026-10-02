@@ -148,3 +148,7 @@ run synchronisation as a machine sender.
 
 Native directory snapshots can be exchanged privately for operator review; see
 [file exchange](files.md) for format, settings, replay and retention rules.
+
+Operator-run [connection health and record retention](operations.md) diagnose
+connection failures and purge only eligible operational history with audited
+per-row retries. Retention periods default to keeping records.

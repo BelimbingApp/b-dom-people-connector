@@ -89,8 +89,8 @@ operator settings writes. Pre-authentication and replay refusals receive the
 host's unscoped guest audit, avoiding an unauthenticated claim of tenant
 identity. No body, signature, secret or provider error text is logged.
 
-Replay and delivery history survive restart and secret rotation and are retained
-for the connection's lifetime; retention work is a later slice. Changing
+Replay and delivery history survive restart and secret rotation and are kept
+until an operator purge under the company's [retention](operations.md) period. Changing
 provider or Workforce mapping clears the signing secret, intake switch and
 clock-difference override; removing a connection clears them and also deletes
 its receipt history. Recreating a connection starts a new receipt lifetime:

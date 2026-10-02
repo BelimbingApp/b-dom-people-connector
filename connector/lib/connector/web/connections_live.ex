@@ -539,6 +539,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Web.ConnectionsLive do
           />
 
           <div :if={@can_manage?} class="mt-5 space-y-5">
+            <.action_link navigate={~p"/integrations/people/operations?company_id=#{@company.id}"} id="people-connections-operations" icon="manage" title="Health and retention">Health and retention</.action_link>
             <.link navigate={~p"/integrations/people/files?company_id=#{@company.id}"} id="people-connections-files">File exchange</.link>
             <.provider_form providers={@providers} status={@connection_status} />
 
