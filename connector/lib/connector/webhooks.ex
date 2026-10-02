@@ -111,6 +111,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Webhooks do
     settings_scope = SettingsScope.company(connection.platform_company_id, connection.tenant_id)
     :ok = Settings.delete(@secret, settings_scope)
     :ok = Settings.delete(@enabled, settings_scope)
+    :ok = Settings.delete(@skew, settings_scope)
     :ok
   end
 

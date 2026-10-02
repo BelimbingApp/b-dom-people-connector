@@ -91,6 +91,7 @@ identity. No body, signature, secret or provider error text is logged.
 
 Replay and delivery history survive restart and secret rotation and are retained
 for the connection's lifetime; retention work is a later slice. Changing
-provider or Workforce mapping clears signing settings; removing a connection
-also deletes its receipt history. Recreating a connection starts a new receipt
-lifetime: configure a fresh signing secret rather than reusing the old one.
+provider or Workforce mapping clears the signing secret, intake switch and
+clock-difference override; removing a connection clears them and also deletes
+its receipt history. Recreating a connection starts a new receipt lifetime:
+configure a fresh signing secret rather than reusing the old one.

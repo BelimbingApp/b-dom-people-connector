@@ -175,7 +175,7 @@ defmodule Bilimbi.PeopleConnector.Connector.WebhooksTest do
              Connector.webhook_summary(operator, 73)
   end
 
-  test "secrets are encrypted, never returned to operator, and deleted on connection removal", %{
+  test "secrets are encrypted, never returned, and signing settings deleted on removal", %{
     operator: operator
   } do
     %{rows: [[encrypted?, stored]]} =
@@ -190,12 +190,15 @@ defmodule Bilimbi.PeopleConnector.Connector.WebhooksTest do
     assert {:ok, summary} = Connector.webhook_summary(operator, 73)
     assert summary.secret_stored?
     refute inspect(summary) =~ @secret
+    {:ok, _} = Connector.put_webhook_settings(operator, 73, %{max_skew_seconds: 60})
     assert :ok = Connector.remove_connection(operator, 73)
 
     assert %{rows: [[0]]} =
-             SQL.query!(Repo, "SELECT count(*) FROM base_settings WHERE key = $1", [
-               Webhooks.secret_key()
-             ])
+             SQL.query!(
+               Repo,
+               "SELECT count(*) FROM base_settings WHERE key LIKE 'people-connector.webhook.%'",
+               []
+             )
   end
 
   test "handler rechecks a secret rotated between verification and handling", %{
@@ -343,6 +346,7 @@ defmodule Bilimbi.PeopleConnector.Connector.WebhooksTest do
     operator: operator,
     registry: registry
   } do
+    {:ok, _} = Connector.put_webhook_settings(operator, 73, %{max_skew_seconds: 60})
     assert {:ok, context} = Webhooks.verify(request(signed_headers(), @body))
     # Earlier provider mapping is a Connector-owned fixture, not a private People read.
     SQL.query!(
@@ -359,7 +363,7 @@ defmodule Bilimbi.PeopleConnector.Connector.WebhooksTest do
     assert {:ok, _} =
              Connector.configure_connection(operator, 73, registry, Providers.native_id())
 
-    assert {:ok, %{enabled: false, secret_stored?: false}} =
+    assert {:ok, %{enabled: false, secret_stored?: false, max_skew_seconds: 300}} =
              Connector.webhook_summary(operator, 73)
   end
 
