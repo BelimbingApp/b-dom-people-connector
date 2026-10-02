@@ -27,6 +27,28 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
 
     create_sync_tables!()
     create_webhook_tables!()
+    create_file_tables!()
+  end
+
+  defp create_file_tables! do
+    SQL.query!(
+      Repo,
+      """
+      CREATE TEMPORARY TABLE IF NOT EXISTS people_connector_file_exchanges (
+        id uuid PRIMARY KEY, tenant_id bigint NOT NULL, platform_company_id bigint NOT NULL,
+        connection_id bigint REFERENCES people_connector_connections(id) ON DELETE SET NULL,
+        workforce_source_id varchar(100) NOT NULL, workforce_company_id bigint NOT NULL,
+        direction varchar(10) NOT NULL, sha256 varchar(64) NOT NULL, record_count integer NOT NULL,
+        state varchar(10) NOT NULL, artifact_id uuid,
+        inserted_at timestamp(6) NOT NULL, updated_at timestamp(6) NOT NULL,
+        CONSTRAINT people_connector_file_exchanges_replay_unique UNIQUE (connection_id, direction, sha256),
+        CONSTRAINT people_connector_file_exchange_values CHECK (
+          direction IN ('import', 'export') AND state IN ('pending', 'ready', 'failed') AND
+          record_count >= 0 AND workforce_company_id > 0 AND (state <> 'ready' OR artifact_id IS NOT NULL))
+      ) ON COMMIT PRESERVE ROWS
+      """,
+      []
+    )
   end
 
   defp create_webhook_tables! do

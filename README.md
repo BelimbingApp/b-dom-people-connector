@@ -19,6 +19,8 @@ the co-located native People provider can be chosen; it needs no provider
 credential. Native inbound notifications use a separate encrypted company
 signing secret and operator-controlled intake; see
 [the webhook contract](connector/docs/webhooks.md).
+Operator directory import/export uses private Base Artifacts with retention; see
+[file exchange](connector/docs/files.md).
 The native adapter serves the native provider's directory reads; without it
 mounted, synchronisation is refused, and there is no transport. Its tables are fresh
 Bilimbi-only schema. No legacy People users or data are being migrated.

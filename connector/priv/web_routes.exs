@@ -1,5 +1,18 @@
 [
   %{
+    path: "/integrations/people/files",
+    live: Bilimbi.PeopleConnector.Connector.Web.FilesLive,
+    session: :auth,
+    capability: "people-connector.connections.manage"
+  },
+  %{
+    path: "/integrations/people/files/:company_id/:id",
+    controller: Bilimbi.PeopleConnector.Connector.Web.FilesController,
+    action: :download,
+    session: :auth,
+    capability: "people-connector.connections.manage"
+  },
+  %{
     webhook: "people-native",
     verify: {Bilimbi.PeopleConnector.Connector.Webhooks, :verify},
     handle: {Bilimbi.PeopleConnector.Connector.Webhooks, :handle}
