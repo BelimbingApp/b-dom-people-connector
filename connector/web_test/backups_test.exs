@@ -158,7 +158,7 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     File.rm!(path)
     assert {:error, _} = Backup.preview(c.operator, 73, backup.id)
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_backups SET expires_at = now() - interval '1 second'",
       []
@@ -263,7 +263,7 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
 
     {:ok, preview} = Backup.preview(c.operator, 73, backup.id)
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_backups SET preview_expires_at = now() - interval '1 second'",
       []
@@ -293,7 +293,7 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     assert {:error, :sync_in_progress} =
              Backup.restore(c.operator, 73, backup.id, preview.token, true)
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_sync_runs SET state = 'succeeded', finished_at = now()",
       []
@@ -432,7 +432,7 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     backups = for _ <- 1..count, do: elem(Backup.create(c.operator, 73), 1)
 
     for {backup, age} <- Enum.zip(backups, count..1//-1) do
-      SQL.query!(
+      Fixtures.utc_query!(
         Repo,
         "UPDATE people_connector_backups SET expires_at = now() - make_interval(secs => $1) WHERE id = $2",
         [age, Ecto.UUID.dump!(backup.id)]
