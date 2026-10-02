@@ -25,12 +25,28 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.CreateRetentionAttempts d
       )
     )
 
-    create(index(:people_connector_sync_runs, [:connection_id, :finished_at], name: :people_connector_sync_runs_retention))
-    create(index(:people_connector_webhook_deliveries, [:connection_id, :received_at], name: :people_connector_webhook_deliveries_retention))
-    create(index(:people_connector_webhook_nonces, [:connection_id, :received_at], name: :people_connector_webhook_nonces_retention))
+    create(
+      index(:people_connector_sync_runs, [:connection_id, :finished_at],
+        name: :people_connector_sync_runs_retention
+      )
+    )
 
     create(
-      index(:people_connector_file_exchanges, [:tenant_id, :platform_company_id, :inserted_at], name: :people_connector_file_exchanges_retention)
+      index(:people_connector_webhook_deliveries, [:connection_id, :received_at],
+        name: :people_connector_webhook_deliveries_retention
+      )
+    )
+
+    create(
+      index(:people_connector_webhook_nonces, [:connection_id, :received_at],
+        name: :people_connector_webhook_nonces_retention
+      )
+    )
+
+    create(
+      index(:people_connector_file_exchanges, [:tenant_id, :platform_company_id, :inserted_at],
+        name: :people_connector_file_exchanges_retention
+      )
     )
   end
 end

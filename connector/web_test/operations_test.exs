@@ -389,5 +389,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
           workforce_source_id: "people/native",
           workforce_company_id: 73,
           records: []
-        }, pretty: space == 1)
+        },
+        pretty: space == 1
+      )
 end
