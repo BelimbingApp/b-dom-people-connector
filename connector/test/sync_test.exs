@@ -62,6 +62,12 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
     {:ok, scope} = Tenancy.scope(41)
     {:ok, status} = Connector.status(scope, 73)
     [provider] = Bilimbi.PeopleConnector.Connector.Registry.providers(Providers.installed())
+
+    provider = %{
+      provider
+      | capabilities: Enum.reject(provider.capabilities, &(&1.key == "organization_directory"))
+    }
+
     %{scope: scope, status: status, provider: provider}
   end
 

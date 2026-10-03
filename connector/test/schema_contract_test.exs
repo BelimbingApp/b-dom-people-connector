@@ -55,7 +55,7 @@ defmodule Bilimbi.PeopleConnector.Connector.SchemaContractTest do
 
     assert length(
              Ecto.Migrator.run(Repo, @migrations, :up, all: true, prefix: prefix, log: false)
-           ) == 6
+           ) == 7
 
     %{prefix: prefix}
   end

@@ -5,20 +5,28 @@ accessible platform company, enable file exchange and the directory JSON format,
 and set byte and record limits. Only enabled co-located native connections with
 a current Workforce mapping are accepted. Remote and vendor formats are refused.
 
-Export captures the current synchronised company/employee directory. Run
+Export captures the current synchronised company, employee and position directory. Run
 **Synchronise now** first when the directory is stale or unavailable. Import
 validates and privately retains a directory file for review; it does not update
 live projections, advance a checkpoint, restore a connection or change People
 business history. Download the imported file from the recent exchange history.
 This is file exchange, not backup/recovery or a provider write port.
 
-The immutable format is `people-directory-v1`. The JSON object has exactly
-`format`, `tenant_id`, `platform_company_id`, `workforce_source_id`,
-`workforce_company_id`, and `records`. Platform company identifies Core Company;
-workforce company and source identify the separate People Workforce mapping.
-Each record has exactly the WorkforceRecord fields, with `kind` as `company` or
-`employee` and `observed_at` as an ISO-8601 instant. Source and workforce company
-must match the selected connection. Duplicate kind/stable-ID pairs, invalid
+Formats are immutable once published. Import accepts `people-directory-v1` and
+`people-directory-v2`; export writes v2 when the directory holds positions and
+v1 otherwise. Both JSON objects have exactly `format`, `tenant_id`,
+`platform_company_id`, `workforce_source_id`, `workforce_company_id`, and
+`records`. Platform company identifies Core Company; workforce company and source
+identify the separate People Workforce mapping. A v1 record has exactly
+`kind` (`company` or `employee`), `source_id`, `stable_id`,
+`workforce_company_id`, `name`, `code`, `email`, `supervisor_stable_id`,
+`observed_at` (an ISO-8601 instant) and `active`. A v2 record has the same
+fields and also allows `kind` `position`; position records also carry
+`parent_stable_id`, `version`, `vacant`, `assignments_incomplete` and at most
+500 `assignments`, each with exactly `source_id`, `stable_id`,
+`employee_stable_id` and `kind`. A v1 file with position records or position
+fields is refused. Source and workforce company must match the selected
+connection. Duplicate kind/stable-ID pairs, invalid
 record fields, extra envelope/record fields and unsupported formats are refused.
 No names, filenames or document contents enter exchange audit payloads.
 

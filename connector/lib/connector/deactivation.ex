@@ -21,7 +21,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Deactivation do
 
   @spec valid?(term()) :: boolean()
   def valid?(%__MODULE__{} = change) do
-    change.kind in [:company, :employee] and WorkforceRecord.identifier?(change.source_id) and
+    change.kind in [:company, :employee, :position] and
+      WorkforceRecord.identifier?(change.source_id) and
       WorkforceRecord.identifier?(change.stable_id) and match?(%DateTime{}, change.observed_at)
   end
 

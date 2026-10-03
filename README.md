@@ -10,7 +10,7 @@ It does not build as a standalone Mix project.
 | Module | Descriptor ID | Future ownership |
 | --- | --- | --- |
 | [`connector/`](connector/docs/README.md) | `people_connector/connector` | integration contracts, company connections, synchronisation, projections and reconciliation |
-| [`native_people_adapter/`](native_people_adapter/docs/README.md) | `people_connector/native_people_adapter` | in-process People Workforce adapter (company and employee directory reads) |
+| [`native_people_adapter/`](native_people_adapter/docs/README.md) | `people_connector/native_people_adapter` | in-process People Workforce adapter (company, employee and organisation directory reads) |
 
 The Connector module has provider-neutral contracts, a capability registry,
 company connection storage with an operator page, and a synchronisation engine

@@ -69,7 +69,153 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
     {:ok, scope} = Tenancy.scope(41)
     {:ok, other_scope} = Tenancy.scope(42)
 
+    Bilimbi.People.Workforce.register_position_reader(__MODULE__.PositionReader)
+
+    on_exit(fn ->
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+    end)
+
     %{scope: scope, other_scope: other_scope}
+  end
+
+  defmodule PositionReader do
+    def positions(_scope, _company, date, options) do
+      send(self(), {:positions_read, date, options})
+      rows = Process.get(:native_test_positions, [])
+      size = Keyword.fetch!(options, :page_size)
+      page = Keyword.fetch!(options, :page)
+      {:ok, Enum.slice(rows, (page - 1) * size, size)}
+    end
+  end
+
+  defp position(id, attrs \\ %{}) do
+    alias Bilimbi.People.Workforce.{Position, Reference}
+
+    struct!(
+      %Position{
+        reference: %Reference{
+          source_id: "people/native",
+          type: :position,
+          stable_id: to_string(id)
+        },
+        company_reference: %Reference{source_id: "people/native", type: :company, stable_id: "73"},
+        platform_company_id: 73,
+        workforce_company_id: 73,
+        code: "P-#{id}",
+        title: "Position #{id}",
+        version: 1,
+        vacant?: true,
+        assignments: [],
+        assignments_incomplete?: false
+      },
+      attrs
+    )
+  end
+
+  test "organisation declarations and bounded position assignments preserve workforce identity",
+       %{scope: scope} do
+    alias Bilimbi.People.Workforce.Reference
+
+    holder = %{
+      reference: %Reference{source_id: "people/native", type: :assignment, stable_id: "1"},
+      employee_reference: %Reference{source_id: "people/native", type: :employee, stable_id: "1"},
+      kind: "acting"
+    }
+
+    Process.put(:native_test_positions, [
+      position(1),
+      position(2, %{
+        assignments: [holder],
+        vacant?: true,
+        parent_reference: %Reference{source_id: "people/native", type: :position, stable_id: "1"},
+        assignments_incomplete?: true
+      })
+    ])
+
+    auth = authorization(scope, %{capability: "organization_directory"})
+    pages = read_all(auth, request(%{limit: 1}))
+    assert [first, second] = Enum.flat_map(pages, & &1.entries)
+    assert first.kind == :position and first.stable_id == "1"
+    assert second.parent_stable_id == "1" and second.version == 1 and second.vacant
+    assert second.assignments_incomplete
+    assert [%{stable_id: "1", employee_stable_id: "1", kind: "acting"}] = second.assignments
+    assert Enum.all?([first, second], &WorkforceRecord.valid?/1)
+    assert Enum.all?(pages, &(&1.as_of == hd(pages).as_of and &1.snapshot))
+    assert_receive {:positions_read, date, _}
+    assert date == DateTime.to_date(hd(pages).as_of)
+
+    {:ok, replay} =
+      NativePeopleAdapter.read(auth, request(%{limit: 1, cursor: hd(pages).next_cursor}))
+
+    assert replay == Enum.at(pages, 1)
+
+    assert {:error, :invalid_cursor} =
+             NativePeopleAdapter.read(
+               auth,
+               request(%{limit: 2, cursor: hd(pages).next_cursor})
+             )
+
+    assert {:error, :invalid_cursor} =
+             NativePeopleAdapter.read(
+               authorization(scope, %{
+                 capability: "organization_directory",
+                 platform_company_id: 74,
+                 workforce_company_id: 74
+               }),
+               request(%{limit: 1, cursor: hd(pages).next_cursor})
+             )
+
+    assert {:error, :invalid_cursor} =
+             NativePeopleAdapter.read(auth, request(%{cursor: "v1:1:1"}))
+  end
+
+  test "organisation reads refuse scope, mapping, forged authority and missing owners", %{
+    scope: scope,
+    other_scope: other
+  } do
+    auth = authorization(scope, %{capability: "organization_directory"})
+    assert {:error, :not_found} = NativePeopleAdapter.read(%{auth | scope: other}, request())
+
+    assert {:error, :invalid_authorization} =
+             NativePeopleAdapter.read(%{auth | scope: nil}, request())
+
+    assert {:error, :invalid_authorization} =
+             NativePeopleAdapter.read(%{auth | direction: :write}, request())
+
+    Process.put(:native_test_positions, [position(1, %{workforce_company_id: 74})])
+    assert {:error, :mapping_mismatch} = NativePeopleAdapter.read(auth, request())
+    Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+
+    assert {:ok, %{freshness: {:unavailable, :organisation_unavailable}, entries: []}} =
+             NativePeopleAdapter.read(auth, request())
+  end
+
+  test "organisation reads stay within the public seam page bound", %{scope: scope} do
+    Process.put(:native_test_positions, Enum.map(1..101, &position/1))
+    auth = authorization(scope, %{capability: "organization_directory"})
+    {:ok, first} = NativePeopleAdapter.read(auth, request(%{limit: 1000}))
+    assert length(first.entries) == 100
+    assert_receive {:positions_read, _, [page: 1, page_size: 100]}
+
+    {:ok, final} =
+      NativePeopleAdapter.read(auth, request(%{limit: 1000, cursor: first.next_cursor}))
+
+    assert [%{stable_id: "101"}] = final.entries
+    assert final.next_cursor == nil and final.as_of == first.as_of
+  end
+
+  test "organisation DTO refuses unbounded or malformed assignments", %{scope: scope} do
+    Process.put(:native_test_positions, [position(1)])
+
+    {:ok, %{entries: [record]}} =
+      NativePeopleAdapter.read(
+        authorization(scope, %{capability: "organization_directory"}),
+        request()
+      )
+
+    refute WorkforceRecord.valid?(%{record | assignments: List.duplicate(nil, 501)})
+    refute WorkforceRecord.valid?(%{record | vacant: nil})
+    refute WorkforceRecord.valid?(%{record | parent_stable_id: String.duplicate("x", 101)})
   end
 
   defp employee!(scope, company_id, number, attrs \\ %{}) do
@@ -266,6 +412,139 @@ defmodule Bilimbi.PeopleConnector.NativePeopleAdapterTest do
 
     defp sync(context, key, opts \\ []) do
       Sync.run(context.scope, context.status, context.provider, NativePeopleAdapter, key, opts)
+    end
+
+    test "organisation projection keeps kind identity, holders and idempotency", context do
+      employee = employee!(context.scope, 73, "E-1")
+      alias Bilimbi.People.Workforce.Reference
+
+      Process.put(:native_test_positions, [
+        position(employee.id, %{
+          assignments: [
+            %{
+              reference: %Reference{
+                source_id: "people/native",
+                type: :assignment,
+                stable_id: "a-1"
+              },
+              employee_reference: %Reference{
+                source_id: "people/native",
+                type: :employee,
+                stable_id: to_string(employee.id)
+              },
+              kind: "substantive"
+            }
+          ],
+          vacant?: false
+        })
+      ])
+
+      assert {:ok, %{state: :succeeded, applied: 3}} = sync(context, "org-boot")
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      projected = Enum.find(records, &(&1.kind == :position))
+      assert projected.stable_id == to_string(employee.id)
+
+      assert projected.assignments == [
+               %Bilimbi.PeopleConnector.Connector.AssignmentRecord{
+                 source_id: "people/native",
+                 stable_id: "a-1",
+                 employee_stable_id: to_string(employee.id),
+                 kind: "substantive"
+               }
+             ]
+
+      assert {:ok, %{unchanged: 3, applied: 0}} = sync(context, "org-again")
+      Process.put(:native_test_positions, [])
+      assert {:ok, %{deactivated: 1}} = sync(context, "org-removed")
+      {:ok, %{value: remaining}} = Connector.workforce(context.scope, 73)
+      refute Enum.any?(remaining, &(&1.kind == :position))
+    end
+
+    test "without a position reader the provider declares no organisation stream", context do
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      {:ok, provider} = Registry.fetch(Providers.installed(), "people.native")
+      refute Enum.any?(provider.capabilities, &(&1.key == "organization_directory"))
+      employee!(context.scope, 73, "E-1")
+
+      assert {:ok, %{state: :succeeded, applied: 2}} =
+               sync(%{context | provider: provider}, "no-reader")
+
+      refute_received {:positions_read, _, _}
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      refute Enum.any?(records, &(&1.kind == :position))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+      assert summary.open_issues == []
+    end
+
+    test "positions kept after the organisation stream is withdrawn open an issue", context do
+      Process.put(:native_test_positions, [position(9)])
+      assert {:ok, %{state: :succeeded}} = sync(context, "with-reader")
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      {:ok, provider} = Registry.fetch(Providers.installed(), "people.native")
+
+      assert {:ok, %{state: :succeeded, deactivated: 0}} =
+               sync(%{context | provider: provider}, "withdrawn", full: true)
+
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert Enum.any?(records, &(&1.kind == :position and &1.stable_id == "9"))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"organisation_unavailable", "provider_unavailable"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason})
+    end
+
+    test "a malformed position is refused alone and the pass still applies", context do
+      employee!(context.scope, 73, "E-1")
+
+      Process.put(:native_test_positions, [
+        position(1),
+        position(2, %{title: String.duplicate("x", 256)})
+      ])
+
+      assert {:ok, %{state: :succeeded, applied: 3, refused: 1}} = sync(context, "bad-position")
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert [%{stable_id: "1"}] = Enum.filter(records, &(&1.kind == :position))
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"record_refused", "invalid_record", "position", "2"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason, &1.record_kind, &1.stable_id})
+    end
+
+    test "a missing organisation reader keeps the directory in sync and opens an issue",
+         context do
+      Process.put(:native_test_positions, [position(9)])
+      assert {:ok, %{state: :succeeded}} = sync(context, "before-missing")
+      Bilimbi.People.Workforce.unregister_position_reader(__MODULE__.PositionReader)
+      employee!(context.scope, 73, "E-2")
+
+      assert {:ok, %{state: :succeeded, applied: 1, deactivated: 0}} =
+               sync(context, "missing", full: true)
+
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert Enum.map(records, & &1.kind) |> Enum.sort() == [:company, :employee, :position]
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+
+      assert [{"organisation_unavailable", "provider_unavailable"}] =
+               Enum.map(summary.open_issues, &{&1.kind, &1.reason})
+
+      Bilimbi.People.Workforce.register_position_reader(__MODULE__.PositionReader)
+      assert {:ok, %{state: :succeeded}} = sync(context, "restored")
+      {:ok, summary} = Connector.sync_summary(context.scope, 73)
+      assert summary.open_issues == []
+    end
+
+    test "a multi-page organisation pass never deactivates absent positions", context do
+      {:ok, _} = Sync.put_policy(context.scope, 73, %{page_limit: 2})
+      Process.put(:native_test_positions, Enum.map(1..3, &position/1))
+      assert {:ok, %{state: :succeeded, applied: 4}} = sync(context, "org-paged")
+
+      Process.put(:native_test_positions, Enum.map(2..3, &position/1))
+      assert {:ok, %{state: :succeeded, deactivated: 0}} = sync(context, "org-paged-gap")
+
+      Process.put(:native_test_positions, [position(2)])
+      assert {:ok, %{state: :succeeded, deactivated: 2}} = sync(context, "org-single")
+      {:ok, %{value: records}} = Connector.workforce(context.scope, 73)
+      assert [%{stable_id: "2"}] = Enum.filter(records, &(&1.kind == :position))
     end
 
     test "bootstraps, projects and stays idempotent", context do

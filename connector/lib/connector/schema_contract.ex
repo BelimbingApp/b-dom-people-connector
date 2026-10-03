@@ -154,6 +154,8 @@ defmodule Bilimbi.PeopleConnector.Connector.SchemaContract do
         name: "people_connector_workforce_records",
         columns: %{
           "active" => %{default: nil, type: :boolean, nullable: false},
+          "assignments" => %{default: {:string, "[]"}, type: :jsonb, nullable: false},
+          "assignments_incomplete" => %{default: nil, type: :boolean, nullable: true},
           "code" => %{default: nil, type: {:varchar, 100}, nullable: false},
           "connection_id" => %{default: nil, type: :bigint, nullable: false},
           "content_hash" => %{default: nil, type: {:varchar, 64}, nullable: false},
@@ -168,11 +170,14 @@ defmodule Bilimbi.PeopleConnector.Connector.SchemaContract do
           "kind" => %{default: nil, type: {:varchar, 20}, nullable: false},
           "name" => %{default: nil, type: {:varchar, 255}, nullable: false},
           "observed_at" => %{default: nil, type: {:timestamp, 6}, nullable: false},
+          "parent_stable_id" => %{default: nil, type: {:varchar, 100}, nullable: true},
           "source_id" => %{default: nil, type: {:varchar, 100}, nullable: false},
           "stable_id" => %{default: nil, type: {:varchar, 100}, nullable: false},
           "supervisor_stable_id" => %{default: nil, type: {:varchar, 100}, nullable: true},
           "tenant_id" => %{default: nil, type: :bigint, nullable: false},
           "updated_at" => %{default: nil, type: {:timestamp, 0}, nullable: false},
+          "vacant" => %{default: nil, type: :boolean, nullable: true},
+          "version" => %{default: nil, type: :integer, nullable: true},
           "workforce_company_id" => %{default: nil, type: :bigint, nullable: false}
         },
         indexes: %{
@@ -198,7 +203,7 @@ defmodule Bilimbi.PeopleConnector.Connector.SchemaContract do
         checks: %{
           "people_connector_workforce_records_kind" => %{
             expression:
-              "CHECK (kind::text = ANY (ARRAY['company'::character varying, 'employee'::character varying]::text[]))"
+              "CHECK (kind::text = ANY (ARRAY['company'::character varying, 'employee'::character varying, 'position'::character varying]::text[]))"
           }
         }
       },

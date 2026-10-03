@@ -186,11 +186,13 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
             id bigserial PRIMARY KEY, tenant_id bigint NOT NULL,
             connection_id bigint NOT NULL
               REFERENCES people_connector_connections(id) ON DELETE CASCADE,
-            kind varchar(20) NOT NULL CHECK (kind IN ('company', 'employee')),
+            kind varchar(20) NOT NULL CHECK (kind IN ('company', 'employee', 'position')),
             source_id varchar(100) NOT NULL, stable_id varchar(100) NOT NULL,
             workforce_company_id bigint NOT NULL, active boolean NOT NULL,
             name varchar(255) NOT NULL, code varchar(100) NOT NULL, email varchar(255),
-            supervisor_stable_id varchar(100), content_hash varchar(64) NOT NULL,
+            supervisor_stable_id varchar(100), parent_stable_id varchar(100),
+            version integer, vacant boolean, assignments_incomplete boolean,
+            assignments jsonb NOT NULL DEFAULT '[]'::jsonb, content_hash varchar(64) NOT NULL,
             observed_at timestamp NOT NULL, deactivated_at timestamp,
             inserted_at timestamp(0) NOT NULL, updated_at timestamp(0) NOT NULL,
             CONSTRAINT people_connector_workforce_records_identity_unique
@@ -272,6 +274,15 @@ defmodule Bilimbi.PeopleConnector.Connector.TestAdapter do
   @behaviour Bilimbi.PeopleConnector.Connector.ReadPort
 
   @impl true
+  def read(%{capability: "organization_directory"}, _request) do
+    {:ok,
+     %Bilimbi.PeopleConnector.Connector.Page{
+       entries: [],
+       as_of: DateTime.utc_now(),
+       snapshot: true
+     }}
+  end
+
   def read(authorization, request) do
     send(self(), {:port_read, authorization, request})
     Process.get(:people_connector_test_pages).(request)

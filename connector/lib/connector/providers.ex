@@ -4,10 +4,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Providers do
 
   Only the co-located native People provider is offered. It reads through the
   mounted People Workforce public API, so it needs no credential and no
-  transport. Remote and third-party providers are not offered until their
-  transport and authority are separately evidenced.
+  transport. It declares organisation directory reads only while Workforce has
+  a registered position reader. Remote and third-party providers are not
+  offered until their transport and authority are separately evidenced.
   """
 
+  alias Bilimbi.People.Workforce
   alias Bilimbi.PeopleConnector.Connector.Capability
   alias Bilimbi.PeopleConnector.Connector.Provider
   alias Bilimbi.PeopleConnector.Connector.Registry
@@ -21,9 +23,15 @@ defmodule Bilimbi.PeopleConnector.Connector.Providers do
   def installed do
     {:ok, company} = Capability.new("company_directory", :read)
     {:ok, employees} = Capability.new("employee_directory", :read)
+    {:ok, organisation} = Capability.new("organization_directory", :read)
+
+    capabilities =
+      if Workforce.positions_available?(),
+        do: [company, employees, organisation],
+        else: [company, employees]
 
     {:ok, native} =
-      Provider.new(@native_id, "People (this installation)", "1.0.0", [company, employees])
+      Provider.new(@native_id, "People (this installation)", "1.0.0", capabilities)
 
     {:ok, registry} = Registry.register(Registry.new(), native)
     registry

@@ -15,6 +15,10 @@ defmodule Bilimbi.PeopleConnector.Connector.ReconciliationIssue do
     * `empty_bootstrap` - `no_records`: a full read returned nothing.
     * `unknown_outcome` - `no_outcome_recorded`: a pass stopped without an
       outcome.
+    * `organisation_unavailable` - `provider_unavailable`: the organisation
+      stream was unavailable or is no longer declared while active positions
+      remain, so only the directory stream was applied; resolves on the next
+      pass that reads it or finds no active position.
   """
 
   use Ecto.Schema
