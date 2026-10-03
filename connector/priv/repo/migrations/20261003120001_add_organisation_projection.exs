@@ -17,7 +17,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Migrations.AddOrganisationProjection
       add(:version, :integer)
       add(:vacant, :boolean)
       add(:assignments_incomplete, :boolean)
-      add(:assignments, {:array, :map}, null: false, default: [])
+      add(:assignments, :map, null: false, default: fragment("'[]'::jsonb"))
     end
   end
 

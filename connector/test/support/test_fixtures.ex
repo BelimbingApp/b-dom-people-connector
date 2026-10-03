@@ -192,7 +192,7 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
             name varchar(255) NOT NULL, code varchar(100) NOT NULL, email varchar(255),
             supervisor_stable_id varchar(100), parent_stable_id varchar(100),
             version integer, vacant boolean, assignments_incomplete boolean,
-            assignments jsonb[] NOT NULL DEFAULT ARRAY[]::jsonb[], content_hash varchar(64) NOT NULL,
+            assignments jsonb NOT NULL DEFAULT '[]'::jsonb, content_hash varchar(64) NOT NULL,
             observed_at timestamp NOT NULL, deactivated_at timestamp,
             inserted_at timestamp(0) NOT NULL, updated_at timestamp(0) NOT NULL,
             CONSTRAINT people_connector_workforce_records_identity_unique
