@@ -51,7 +51,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     assert {:ok, failed} = Doctor.run(c.operator, 73)
     assert check(failed, :failed_syncs).count == 1
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_sync_runs SET state = 'running', started_at = now() - interval '2 hours', finished_at = NULL",
       []
@@ -172,7 +172,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     assert {:ok, %{deleted: [], errors: []}} = Retention.purge(c.operator, 73)
     SQL.query!(Repo, "ALTER TABLE base_audit_actions DROP CONSTRAINT refuse_first_purge", [])
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_retention_attempts SET attempted_at = now() - interval '2 hours'",
       []
@@ -205,7 +205,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
       []
     )
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "INSERT INTO people_connector_sync_runs (tenant_id, connection_id, platform_company_id, provider_id, idempotency_key, pass, state, reason, applied, unchanged, superseded, deactivated, refused, started_at, finished_at, inserted_at, updated_at) SELECT tenant_id, connection_id, platform_company_id, provider_id, 'old-failed', pass, 'failed', 'adapter_error', 0, 0, 0, 0, 0, now() - interval '36 hours', now() - interval '36 hours', now(), now() FROM people_connector_sync_runs",
       []
@@ -228,7 +228,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
       values = if table =~ "deliveries", do: "'delivery', 'body'", else: "'nonce'"
 
       for {company, age} <- [{73, 25}, {74, 100}] do
-        SQL.query!(
+        Fixtures.utc_query!(
           Repo,
           "INSERT INTO #{table} (tenant_id, connection_id, #{hash}, received_at) SELECT 41, id, #{values}, now() - make_interval(hours => $2) FROM people_connector_connections WHERE platform_company_id = $1",
           [company, age]
@@ -246,13 +246,13 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     {:ok, _} = Retention.configure(c.operator, 73, %{webhook_days: 1})
     assert {:ok, %{deleted: []}} = Retention.purge(c.operator, 73)
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_webhook_deliveries SET received_at = now() - interval '49 hours'",
       []
     )
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_webhook_nonces SET received_at = now() - interval '49 hours'",
       []
@@ -276,7 +276,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     {:ok, second} = FileExchange.import_file(c.operator, 73, file(1))
     {:ok, _} = Retention.configure(c.operator, 73, %{file_days: 1})
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_file_exchanges SET inserted_at = now() - interval '2 days'",
       []
@@ -284,13 +284,18 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
 
     assert {:ok, %{deleted: []}} = Retention.purge(c.operator, 73)
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_file_exchanges SET expires_at = now() - interval '1 second'",
       []
     )
 
-    SQL.query!(Repo, "UPDATE base_artifacts SET expires_at = now() - interval '1 second'", [])
+    Fixtures.utc_query!(
+      Repo,
+      "UPDATE base_artifacts SET expires_at = now() - interval '1 second'",
+      []
+    )
+
     # A directory where Base expects a regular file makes one cleanup fail.
     File.rm!(Path.join(root, first.artifact_id))
     File.mkdir!(Path.join(root, first.artifact_id))
@@ -307,7 +312,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     assert :ok = Connector.remove_connection(c.operator, 73)
     File.rmdir!(Path.join(root, first.artifact_id))
 
-    SQL.query!(
+    Fixtures.utc_query!(
       Repo,
       "UPDATE people_connector_retention_attempts SET attempted_at = now() - interval '2 hours'",
       []
@@ -360,7 +365,7 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
 
   defp age_runs!,
     do:
-      SQL.query!(
+      Fixtures.utc_query!(
         Repo,
         "UPDATE people_connector_sync_runs SET finished_at = now() - interval '2 days'",
         []
