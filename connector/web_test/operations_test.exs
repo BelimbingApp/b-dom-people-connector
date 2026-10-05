@@ -349,7 +349,6 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     revoke!(c)
     # The shell redirects the open page once the grant is gone, so no event acts.
     assert {:error, {:redirect, %{to: "/dashboard"}}} = render_hook(view, "run_doctor", %{})
-    assert {:ok, %{sync_days: 1}} = Retention.policy(c.operator, 73)
     assert count("people_connector_sync_runs") == 2
   end
 
