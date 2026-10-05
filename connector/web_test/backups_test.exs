@@ -26,7 +26,11 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     CompanyFixtures.insert_company!(%{id: 74, tenant_id: 41, name: "Company B", code: "b"})
     CompanyFixtures.insert_company!(%{id: 75, tenant_id: 42, name: "Company C", code: "c"})
     UserFixtures.insert_user!(%{id: 91, company_id: 73, name: "Operator"})
-    grant_capabilities!(["people-connector.connections.view", Connector.manage_capability()])
+    grant_capabilities!([
+      "people-connector.connections.view",
+      Connector.manage_capability(),
+      "people.organisation.manage"
+    ])
     {:ok, system} = Tenancy.scope(41)
     operator = Authentication.sign_in(system, 91, 73)
     registry = Providers.installed()
@@ -43,10 +47,10 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
 
   test "private backup restores config, checkpoint and projections, excludes secrets, audits and replays once",
        c do
-    {:ok, position} = Bilimbi.People.Organisation.create_position(c.system, 73, %{code: "P-1"})
+    {:ok, position} = Bilimbi.People.Organisation.create_position(c.operator, 73, %{code: "P-1"})
 
     {:ok, _} =
-      Bilimbi.People.Organisation.record_version(c.system, 73, position.id, %{
+      Bilimbi.People.Organisation.record_version(c.operator, 73, position.id, %{
         version: 1,
         title: "Position One",
         effective_from: Date.utc_today()

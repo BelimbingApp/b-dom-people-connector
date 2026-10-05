@@ -347,11 +347,9 @@ defmodule Bilimbi.PeopleConnector.Connector.OperationsTest do
     replay = sync!(c, "page-old")
     refute replay.id == run.id
     revoke!(c)
-    render_hook(view, "run_doctor", %{})
-    refute has_element?(view, "#people-doctor-checks")
-    render_hook(view, "save_policy", %{"sync_days" => "2"})
-    render_hook(view, "request_purge", %{})
-    render_hook(view, "purge", %{})
+    # The shell redirects the open page once the grant is gone, so no event acts.
+    assert {:error, {:redirect, %{to: "/dashboard"}}} = render_hook(view, "run_doctor", %{})
+    assert {:ok, %{sync_days: 1}} = Retention.policy(c.operator, 73)
     assert count("people_connector_sync_runs") == 2
   end
 

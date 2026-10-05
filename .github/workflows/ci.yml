@@ -157,6 +157,11 @@ jobs:
         if: matrix.topology != 'connector_only'
         run: (cd apps/web && mix tailwind.install --if-missing)
 
+      # The module hooks test bundles mounted hooks with the pinned esbuild binary.
+      - name: Install esbuild
+        if: matrix.topology != 'connector_only'
+        run: (cd apps/web && mix esbuild.install --if-missing)
+
       - name: Install Node.js
         if: matrix.topology != 'connector_only'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
