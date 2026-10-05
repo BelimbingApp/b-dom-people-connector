@@ -28,7 +28,8 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
 
     grant_capabilities!([
       "people-connector.connections.view",
-      "people-connector.connections.manage"
+      "people-connector.connections.manage",
+      "people.organisation.manage"
     ])
 
     {:ok, scope} = Tenancy.scope(41)
@@ -47,10 +48,10 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
   end
 
   test "native export round trips as a private review import; byte replay deduplicates", c do
-    {:ok, position} = Bilimbi.People.Organisation.create_position(c.scope, 73, %{code: "P-1"})
+    {:ok, position} = Bilimbi.People.Organisation.create_position(c.operator, 73, %{code: "P-1"})
 
     {:ok, _} =
-      Bilimbi.People.Organisation.record_version(c.scope, 73, position.id, %{
+      Bilimbi.People.Organisation.record_version(c.operator, 73, position.id, %{
         version: 1,
         title: "Position One",
         effective_from: Date.utc_today()

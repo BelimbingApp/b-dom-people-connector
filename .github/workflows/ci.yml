@@ -20,7 +20,7 @@ env:
 jobs:
   composition:
     name: ${{ matrix.topology }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ matrix.topology == 'both' && 60 || 30 }}
     strategy:
       fail-fast: false
@@ -156,6 +156,11 @@ jobs:
       - name: Install Tailwind
         if: matrix.topology != 'connector_only'
         run: (cd apps/web && mix tailwind.install --if-missing)
+
+      # The module hooks test bundles mounted hooks with the pinned esbuild binary.
+      - name: Install esbuild
+        if: matrix.topology != 'connector_only'
+        run: (cd apps/web && mix esbuild.install --if-missing)
 
       - name: Install Node.js
         if: matrix.topology != 'connector_only'
