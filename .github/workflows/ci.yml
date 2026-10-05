@@ -20,7 +20,7 @@ env:
 jobs:
   composition:
     name: ${{ matrix.topology }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ matrix.topology == 'both' && 60 || 30 }}
     strategy:
       fail-fast: false
