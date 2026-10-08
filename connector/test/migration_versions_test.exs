@@ -3,6 +3,7 @@ defmodule Bilimbi.PeopleConnector.Connector.MigrationVersionsTest do
 
   @apps Path.expand("../../../..", __DIR__)
   @own Path.expand("../priv/repo/migrations", __DIR__)
+  @mounted Path.basename(@apps) == "apps" and File.dir?(Path.join(@apps, "base"))
 
   defp versions(dir) do
     dir
@@ -14,6 +15,7 @@ defmodule Bilimbi.PeopleConnector.Connector.MigrationVersionsTest do
     end)
   end
 
+  @tag skip: if(@mounted, do: false, else: "not mounted in a Bilimbi checkout")
   test "connector migration versions do not collide with other mounted modules" do
     own = versions(@own)
 
