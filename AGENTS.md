@@ -30,3 +30,7 @@ copy. The [README](README.md) gives mount and CI instructions.
 - A Connector adapter registers itself with `Connector.Adapters.register/2` in
   its application start; do not hard-code adapter modules in the Connector,
   which cannot depend on them. See `native_people_adapter/docs/README.md`.
+- Pick a new migration version later than every version in the mounted Bilimbi
+  (including `apps/base/*`), not by date of authoring: Bilimbi refuses to start
+  on duplicate versions. `connector/test/migration_versions_test.exs` fails on a
+  collision when run from a mounted checkout.

@@ -110,7 +110,7 @@ can skip a live position; until keyset paging exists, a multi-page pass leaves
 an ended position active. Position identity
 includes kind, source and stable ID. Parent, version, vacancy, assignment
 completeness and holder identities are projected without writing People history.
-Migration `20261003120001` adds those projection fields.
+Migration `20261008120001` adds those projection fields.
 
 The engine reads every page of each declared stream before applying any. A stale or unavailable page
 (Workforce freshness vocabulary), an adapter error or exception, a repeated
