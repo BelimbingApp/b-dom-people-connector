@@ -10,6 +10,7 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
   alias Bilimbi.People.Workforce.ReadResult
   alias Bilimbi.PeopleConnector.Connector
   alias Bilimbi.PeopleConnector.Connector.Capability
+  alias Bilimbi.PeopleConnector.Connector.Connection
   alias Bilimbi.PeopleConnector.Connector.Contributions
   alias Bilimbi.PeopleConnector.Connector.Deactivation
   alias Bilimbi.PeopleConnector.Connector.Page
@@ -462,5 +463,73 @@ defmodule Bilimbi.PeopleConnector.Connector.SyncTest do
 
     assert {:error, :not_found} = Connector.workforce(context.scope, 73)
     assert {:error, :not_found} = Connector.sync_summary(context.scope, 73)
+  end
+
+  test "rows carrying another tenant on this tenant's connection are never read or written",
+       context do
+    CompanyFixtures.insert_tenant!(%{id: 42, is_platform_operator: false})
+
+    %{rows: [[connection_id]]} =
+      SQL.query!(Repo, "SELECT id FROM people_connector_connections", [])
+
+    foreign = %{tenant_id: 42, connection_id: connection_id}
+
+    ConnectorFixtures.insert_projection!(
+      Map.merge(foreign, %{stable_id: "99", workforce_company_id: 73, name: "Foreign"})
+    )
+
+    # A later start than any pass below, so an unscoped summary would show it.
+    ConnectorFixtures.insert_run!(
+      Map.merge(foreign, %{
+        platform_company_id: 73,
+        idempotency_key: "foreign",
+        state: "succeeded",
+        started_at: ~N[2099-01-01 00:00:00]
+      })
+    )
+
+    issue_id =
+      ConnectorFixtures.insert_issue!(
+        Map.merge(foreign, %{
+          issue_key: "feed:refused",
+          kind: "feed_refused",
+          reason: "every_record_refused"
+        })
+      )
+
+    # A bootstrap deactivates every unlisted record and resolves the feed issue
+    # of the rows it reads; the foreign rows are neither.
+    serve_pages(%{nil => page([employee(1)])})
+    assert {:ok, run} = sync(context, "boot")
+    assert {run.state, run.applied, run.deactivated} == {:succeeded, 1, 0}
+    assert Enum.map(records(context.scope), & &1.stable_id) == ["1"]
+
+    {:ok, summary} = Connector.sync_summary(context.scope, 73)
+    assert summary.last_run.id == run.id
+    assert summary.open_issues == []
+
+    # The foreign run is not this tenant's recorded result for the key.
+    assert {:error, :sync_in_progress} = sync(context, "foreign")
+    assert {:error, :not_found} = Sync.resolve_issue(context.scope, context.status, issue_id)
+
+    connection = Repo.one(Tenancy.scope_query(Connection, context.scope))
+    assert :ok = Sync.reset(context.scope, connection)
+
+    assert {:ok, %ReadResult{freshness: {:unavailable, :never_synchronised}}} =
+             Connector.workforce(context.scope, 73)
+
+    assert %{rows: [["99", true, "Foreign"]]} =
+             SQL.query!(
+               Repo,
+               "SELECT stable_id, active, name FROM people_connector_workforce_records",
+               []
+             )
+
+    assert %{rows: [["open", 1]]} =
+             SQL.query!(
+               Repo,
+               "SELECT status, occurrences FROM people_connector_reconciliation_issues WHERE tenant_id = 42",
+               []
+             )
   end
 end

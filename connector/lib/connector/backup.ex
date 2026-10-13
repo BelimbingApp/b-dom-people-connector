@@ -82,7 +82,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
          {:ok, {row, bytes}} <-
            Operations.transaction(fn ->
              connection = lock_connection!(scope, company)
-             require_idle!(connection)
+             require_idle!(scope, connection)
              bytes = snapshot(scope, connection) |> Jason.encode!()
 
              row =
@@ -156,7 +156,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
          {:ok, row, document} <- read_backup(scope, company, id) do
       Operations.transaction(fn ->
         connection = lock_connection!(scope, company)
-        require_idle!(connection)
+        require_idle!(scope, connection)
         validate!(row, document, connection)
         row = fetch!(scope, company, id, true)
         if row.restored_at, do: Repo.rollback(:already_restored)
@@ -205,7 +205,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
 
           %{id: row.id, restored_at: row.restored_at, replayed?: true}
         else
-          require_idle!(connection)
+          require_idle!(scope, connection)
 
           unless row.preview_expires_at &&
                    DateTime.before?(DateTime.utc_now(), row.preview_expires_at),
@@ -534,11 +534,9 @@ defmodule Bilimbi.PeopleConnector.Connector.Backup do
     end
   end
 
-  defp require_idle!(connection) do
-    if Repo.exists?(
-         from(r in SyncRun, where: r.connection_id == ^connection.id and r.state == :running)
-       ),
-       do: Repo.rollback(:sync_in_progress)
+  defp require_idle!(scope, connection) do
+    if Repo.exists?(scoped_rows(SyncRun, scope, connection.id) |> where(state: :running)),
+      do: Repo.rollback(:sync_in_progress)
   end
 
   defp changes(current, saved) do
