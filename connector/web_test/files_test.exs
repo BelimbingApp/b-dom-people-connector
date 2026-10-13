@@ -402,6 +402,70 @@ defmodule Bilimbi.PeopleConnector.Connector.FilesTest do
     assert count("people_connector_file_exchanges") == 2
   end
 
+  test "receipts carrying another tenant on this connection are never replayed, reused or published",
+       c do
+    %{rows: [[connection_id]]} =
+      SQL.query!(Repo, "SELECT id FROM people_connector_connections", [])
+
+    hash = :crypto.hash(:sha256, file()) |> Base.encode16(case: :lower)
+
+    # The same bytes on this tenant's connection under another tenant: a ready
+    # receipt an unscoped read would replay, and a failed one it would reuse.
+    for {state, artifact_id} <- [{"ready", Ecto.UUID.bingenerate()}, {"failed", nil}] do
+      ConnectorFixtures.utc_query!(
+        Repo,
+        """
+        INSERT INTO people_connector_file_exchanges
+          (id, tenant_id, platform_company_id, connection_id, workforce_source_id,
+           workforce_company_id, direction, sha256, record_count, state, artifact_id,
+           expires_at, inserted_at, updated_at)
+        VALUES ($1, 42, 73, $2, 'people/native', 73, 'import', $3, 0, $4, $5,
+          now() + interval '1 day', now(), now())
+        """,
+        [Ecto.UUID.bingenerate(), connection_id, hash, state, artifact_id]
+      )
+    end
+
+    assert {:ok, %{records: []}} = FileExchange.summary(c.operator, 73)
+
+    # The receipt this import reserves turns foreign once its bytes are stored,
+    # so publication must neither mark it ready nor fail it.
+    SQL.query!(
+      Repo,
+      """
+      CREATE FUNCTION people_connector_files_test_reassign() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      BEGIN
+        UPDATE people_connector_file_exchanges SET tenant_id = 42 WHERE state = 'pending';
+        RETURN NEW;
+      END
+      $$
+      """,
+      []
+    )
+
+    SQL.query!(
+      Repo,
+      """
+      CREATE TRIGGER people_connector_files_test_reassign AFTER INSERT ON base_artifacts
+      FOR EACH ROW EXECUTE FUNCTION people_connector_files_test_reassign()
+      """,
+      []
+    )
+
+    assert {:error, _reason} = FileExchange.import_file(c.operator, 73, file())
+
+    assert %{rows: rows} =
+             SQL.query!(
+               Repo,
+               "SELECT tenant_id, state, artifact_id IS NULL FROM people_connector_file_exchanges ORDER BY state",
+               []
+             )
+
+    assert rows == [[42, "failed", true], [42, "pending", true], [42, "ready", false]]
+    assert {:ok, %{records: []}} = FileExchange.summary(c.operator, 73)
+  end
+
   defp expire! do
     for table <- ["base_artifacts", "people_connector_file_exchanges"] do
       ConnectorFixtures.utc_query!(

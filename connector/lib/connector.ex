@@ -382,7 +382,7 @@ defmodule Bilimbi.PeopleConnector.Connector do
           # Records synchronised from another provider or workforce company
           # must not survive as this mapping's data.
           if provider_changed? or remapped? do
-            :ok = Sync.reset(connection)
+            :ok = Sync.reset(scope, connection)
             :ok = Webhooks.clear(connection)
           end
 

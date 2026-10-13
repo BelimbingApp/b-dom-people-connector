@@ -198,12 +198,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         }
 
       %Connection{} = connection ->
-        checkpoint = get_checkpoint(connection)
+        checkpoint = get_checkpoint(scope, connection)
 
         last_run =
           Repo.one(
-            from(r in SyncRun,
-              where: r.connection_id == ^connection.id,
+            from(r in owned(SyncRun, scope, connection),
               order_by: [desc: r.started_at, desc: r.id],
               limit: 1
             )
@@ -214,7 +213,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
           checkpoint_version: checkpoint && checkpoint.version,
           as_of_at: checkpoint && checkpoint.as_of_at,
           last_run: last_run && presented_run(last_run, policy, now),
-          open_issues: open_issues(connection),
+          open_issues: open_issues(scope, connection),
           policy: policy
         }
     end
@@ -230,11 +229,11 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         ReadResult.unavailable(:disconnected)
 
       %Connection{} = connection ->
-        checkpoint = get_checkpoint(connection)
+        checkpoint = get_checkpoint(scope, connection)
 
         case freshness(status, checkpoint, policy, DateTime.utc_now()) do
-          :current -> ReadResult.current(active_records(connection))
-          {:stale, as_of} -> ReadResult.stale(active_records(connection), as_of)
+          :current -> ReadResult.current(active_records(scope, connection))
+          {:stale, as_of} -> ReadResult.stale(active_records(scope, connection), as_of)
           {:unavailable, reason} -> ReadResult.unavailable(reason)
         end
     end
@@ -246,9 +245,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     with %Connection{} = connection <- connection_for(scope, status),
          %ReconciliationIssue{status: :open} = issue <-
            Repo.one(
-             from(i in ReconciliationIssue,
-               where: i.id == ^issue_id and i.connection_id == ^connection.id
-             )
+             from(i in owned(ReconciliationIssue, scope, connection), where: i.id == ^issue_id)
            ),
          {:ok, _issue} <-
            issue
@@ -266,10 +263,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
   Forgets what was synchronised through a connection whose provider or
   company mapping changed, so the next pass bootstraps. Runs and issues stay.
   """
-  @spec reset(Connection.t()) :: :ok
-  def reset(%Connection{id: connection_id}) do
-    Repo.delete_all(from(p in Projection, where: p.connection_id == ^connection_id))
-    Repo.delete_all(from(c in Checkpoint, where: c.connection_id == ^connection_id))
+  @spec reset(Scope.t(), Connection.t()) :: :ok
+  def reset(%Scope{} = scope, %Connection{} = connection) do
+    Repo.delete_all(owned(Projection, scope, connection))
+    Repo.delete_all(owned(Checkpoint, scope, connection))
     :ok
   end
 
@@ -279,33 +276,29 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     transact(fn ->
       with {:ok, connection} <- lock_connection(scope, status) do
         now = DateTime.utc_now()
-        expire_overdue(connection, policy, now)
+        expire_overdue(scope, connection, policy, now)
 
         case Repo.one(
-               from(r in SyncRun,
-                 where: r.connection_id == ^connection.id and r.idempotency_key == ^key
-               )
+               from(r in owned(SyncRun, scope, connection), where: r.idempotency_key == ^key)
              ) do
           %SyncRun{} = run ->
             {:ok, {:existing, run}}
 
           nil ->
             if not is_nil(expected_checkpoint) and
-                 checkpoint_version(get_checkpoint(connection)) != expected_checkpoint,
+                 checkpoint_version(get_checkpoint(scope, connection)) != expected_checkpoint,
                do: {:error, :checkpoint_moved},
-               else: begin_run(connection, key, full?, now)
+               else: begin_run(scope, connection, key, full?, now)
         end
       end
     end)
   end
 
-  defp begin_run(connection, key, full?, now) do
-    if Repo.exists?(
-         from(r in SyncRun, where: r.connection_id == ^connection.id and r.state == :running)
-       ) do
+  defp begin_run(scope, connection, key, full?, now) do
+    if Repo.exists?(from(r in owned(SyncRun, scope, connection), where: r.state == :running)) do
       {:error, :sync_in_progress}
     else
-      checkpoint = get_checkpoint(connection)
+      checkpoint = get_checkpoint(scope, connection)
 
       %SyncRun{
         tenant_id: connection.tenant_id,
@@ -326,13 +319,12 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     end
   end
 
-  defp expire_overdue(connection, policy, now) do
+  defp expire_overdue(scope, connection, policy, now) do
     cutoff = DateTime.add(now, -policy.run_timeout_minutes * 60, :second)
 
     Repo.all(
-      from(r in SyncRun,
-        where:
-          r.connection_id == ^connection.id and r.state == :running and r.started_at < ^cutoff,
+      from(r in owned(SyncRun, scope, connection),
+        where: r.state == :running and r.started_at < ^cutoff,
         lock: "FOR UPDATE"
       )
     )
@@ -342,7 +334,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
         |> SyncRun.changeset(%{state: :unknown, reason: "no_outcome_recorded", finished_at: now})
         |> Repo.update()
 
-      report_issue(connection, "run:" <> run.idempotency_key, now, %{
+      report_issue(scope, connection, "run:" <> run.idempotency_key, now, %{
         kind: "unknown_outcome",
         reason: "no_outcome_recorded",
         severity: :warning
@@ -475,7 +467,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   defp finish(scope, run, checkpoint, provider, outcome) do
     transact(fn ->
-      run = Repo.one!(from(r in SyncRun, where: r.id == ^run.id, lock: "FOR UPDATE"))
+      run =
+        Repo.one!(
+          from(r in Tenancy.scope_query(SyncRun, scope),
+            where: r.id == ^run.id,
+            lock: "FOR UPDATE"
+          )
+        )
 
       # A pass that outlived its timeout was already recorded as unknown; its
       # late result is discarded rather than applied.
@@ -517,30 +515,30 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
       is_nil(connection) or not connection.enabled or connection.provider_id != provider.id ->
         close(run, :refused, "connection_changed", %{as_of_at: as_of})
 
-      checkpoint_version(get_checkpoint(connection)) != checkpoint_version(checkpoint) ->
+      checkpoint_version(get_checkpoint(scope, connection)) != checkpoint_version(checkpoint) ->
         close(run, :failed, "checkpoint_moved", %{as_of_at: as_of})
 
       true ->
-        apply_pass(connection, run, provider, entries, as_of, resume, full, organisation)
+        apply_pass(scope, connection, run, provider, entries, as_of, resume, full, organisation)
     end
   end
 
-  defp apply_pass(connection, run, provider, entries, as_of, resume, full, organisation) do
+  defp apply_pass(scope, connection, run, provider, entries, as_of, resume, full, organisation) do
     now = DateTime.utc_now()
 
     projections =
-      Repo.all(from(p in Projection, where: p.connection_id == ^connection.id))
+      Repo.all(owned(Projection, scope, connection))
       |> Map.new(&{{&1.kind, &1.source_id, &1.stable_id}, &1})
 
     state = %{tally: @empty_tally, projections: projections, seen: MapSet.new()}
 
     state =
-      Enum.reduce(entries, state, &apply_entry(&1, &2, connection, provider, now))
+      Enum.reduce(entries, state, &apply_entry(&1, &2, scope, connection, provider, now))
 
     tally = state.tally
 
     if full != [] and entries == [] do
-      report_issue(connection, "bootstrap:empty", now, %{
+      report_issue(scope, connection, "bootstrap:empty", now, %{
         kind: "empty_bootstrap",
         reason: "no_records",
         severity: :warning
@@ -549,7 +547,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
     if tally.refused > 0 and
          tally.applied + tally.deactivated + tally.unchanged + tally.superseded == 0 do
-      report_issue(connection, "feed:refused", now, %{
+      report_issue(scope, connection, "feed:refused", now, %{
         kind: "feed_refused",
         reason: "every_record_refused",
         severity: :error
@@ -568,15 +566,15 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
       if stale_positions?,
         do:
-          report_issue(connection, "organisation:unavailable", now, %{
+          report_issue(scope, connection, "organisation:unavailable", now, %{
             kind: "organisation_unavailable",
             reason: "provider_unavailable",
             severity: :warning
           }),
-        else: resolve_key(connection, "organisation:unavailable", now)
+        else: resolve_key(scope, connection, "organisation:unavailable", now)
 
-      version = advance_checkpoint(connection, as_of, resume)
-      resolve_key(connection, "feed:refused", now)
+      version = advance_checkpoint(scope, connection, as_of, resume)
+      resolve_key(scope, connection, "feed:refused", now)
 
       close(
         run,
@@ -587,18 +585,18 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     end
   end
 
-  defp apply_entry(entry, state, connection, provider, now) do
+  defp apply_entry(entry, state, scope, connection, provider, now) do
     case classify(entry, connection, provider) do
       {:ok, %WorkforceRecord{} = record} ->
         state
         |> mark_seen(record)
-        |> upsert(record, connection, now)
+        |> upsert(record, scope, connection, now)
 
       {:ok, %Deactivation{} = change} ->
-        deactivate(state, change, connection, now)
+        deactivate(state, change, scope, connection, now)
 
       {:refuse, reason, identity} ->
-        report_issue(connection, record_issue_key(identity), now, %{
+        report_issue(scope, connection, record_issue_key(identity), now, %{
           kind: "record_refused",
           reason: reason,
           severity: :error,
@@ -663,7 +661,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     Enum.any?(capabilities, &(&1.key == capability and &1.direction == :read))
   end
 
-  defp upsert(state, record, connection, now) do
+  defp upsert(state, record, scope, connection, now) do
     key = {record.kind, record.source_id, record.stable_id}
     hash = content_hash(record)
 
@@ -680,7 +678,7 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
           |> Projection.changeset(record_changes(record, hash))
           |> Repo.insert!()
 
-        resolve_key(connection, record_issue_key(key), now)
+        resolve_key(scope, connection, record_issue_key(key), now)
         %{state | projections: Map.put(state.projections, key, projection)} |> bump(:applied)
 
       %Projection{} = current ->
@@ -689,26 +687,26 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
             bump(state, :superseded)
 
           current.content_hash == hash ->
-            resolve_key(connection, record_issue_key(key), now)
+            resolve_key(scope, connection, record_issue_key(key), now)
             bump(state, :unchanged)
 
           true ->
             projection =
               current |> Projection.changeset(record_changes(record, hash)) |> Repo.update!()
 
-            resolve_key(connection, record_issue_key(key), now)
+            resolve_key(scope, connection, record_issue_key(key), now)
             counter = if current.active and not record.active, do: :deactivated, else: :applied
             %{state | projections: Map.put(state.projections, key, projection)} |> bump(counter)
         end
     end
   end
 
-  defp deactivate(state, change, connection, now) do
+  defp deactivate(state, change, scope, connection, now) do
     key = {change.kind, change.source_id, change.stable_id}
 
     case Map.get(state.projections, key) do
       nil ->
-        report_issue(connection, record_issue_key(key), now, %{
+        report_issue(scope, connection, record_issue_key(key), now, %{
           kind: "record_refused",
           reason: "unknown_reference",
           severity: :error,
@@ -815,8 +813,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   defp bump(state, counter), do: %{state | tally: Map.update!(state.tally, counter, &(&1 + 1))}
 
-  defp advance_checkpoint(connection, as_of, resume) do
-    case get_checkpoint(connection) do
+  defp advance_checkpoint(scope, connection, as_of, resume) do
+    case get_checkpoint(scope, connection) do
       nil ->
         %Checkpoint{tenant_id: connection.tenant_id, connection_id: connection.id}
         |> Checkpoint.changeset(%{version: 1, resume_cursor: resume, as_of_at: as_of})
@@ -863,8 +861,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     "record:#{kind}:#{digest}"
   end
 
-  defp report_issue(connection, key, now, attributes) do
-    case get_issue(connection, key) do
+  defp report_issue(scope, connection, key, now, attributes) do
+    case get_issue(scope, connection, key) do
       nil ->
         %ReconciliationIssue{
           tenant_id: connection.tenant_id,
@@ -890,8 +888,8 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     end
   end
 
-  defp resolve_key(connection, key, now) do
-    case get_issue(connection, key) do
+  defp resolve_key(scope, connection, key, now) do
+    case get_issue(scope, connection, key) do
       %ReconciliationIssue{status: :open} = issue ->
         issue
         |> ReconciliationIssue.changeset(%{status: :resolved, resolved_at: now})
@@ -902,18 +900,14 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
     end
   end
 
-  defp get_issue(connection, key) do
-    Repo.one(
-      from(i in ReconciliationIssue,
-        where: i.connection_id == ^connection.id and i.issue_key == ^key
-      )
-    )
+  defp get_issue(scope, connection, key) do
+    Repo.one(from(i in owned(ReconciliationIssue, scope, connection), where: i.issue_key == ^key))
   end
 
-  defp open_issues(connection) do
+  defp open_issues(scope, connection) do
     Repo.all(
-      from(i in ReconciliationIssue,
-        where: i.connection_id == ^connection.id and i.status == :open,
+      from(i in owned(ReconciliationIssue, scope, connection),
+        where: i.status == :open,
         order_by: [asc: i.severity, desc: i.last_seen_at, desc: i.id],
         limit: 50
       )
@@ -943,10 +937,10 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
 
   defp presented_run(run, _policy, _now), do: run
 
-  defp active_records(connection) do
+  defp active_records(scope, connection) do
     Repo.all(
-      from(p in Projection,
-        where: p.connection_id == ^connection.id and p.active,
+      from(p in owned(Projection, scope, connection),
+        where: p.active,
         order_by: [asc: p.kind, asc: p.name, asc: p.stable_id]
       )
     )
@@ -997,8 +991,13 @@ defmodule Bilimbi.PeopleConnector.Connector.Sync do
        else: {:error, :conflict}
   end
 
-  defp get_checkpoint(connection),
-    do: Repo.one(from(c in Checkpoint, where: c.connection_id == ^connection.id))
+  defp get_checkpoint(scope, connection),
+    do: Repo.one(owned(Checkpoint, scope, connection))
+
+  # A connection's rows are read under the caller's tenant scope as well as the
+  # connection id, so a row carrying another tenant is never read or written.
+  defp owned(schema, scope, %Connection{id: connection_id}),
+    do: from(r in Tenancy.scope_query(schema, scope), where: r.connection_id == ^connection_id)
 
   defp checkpoint_version(nil), do: 0
   defp checkpoint_version(%Checkpoint{version: version}), do: version

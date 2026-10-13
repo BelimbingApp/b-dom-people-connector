@@ -41,6 +41,9 @@ synchronisation tables, each cascading from its connection:
 one `running` row), `people_connector_workforce_records` (one row per
 connection, kind, provider source and stable ID) and
 `people_connector_reconciliation_issues` (unique issue key per connection).
+Each row carries its own `tenant_id`, and every read starts from
+`Tenancy.scope_query/2` with the caller's scope as well as the connection ID, so
+a row whose tenant disagrees with its connection is never read or written.
 Both migrations are `:bilimbi_only`. No Belimbing table or data is adopted or
 imported.
 
