@@ -326,7 +326,8 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
   test "rows carrying another tenant on this connection never block, enter or leave a backup",
        c do
     sync!(c, "own")
-    %{rows: [[connection_id]]} = SQL.query!(Repo, "SELECT id FROM people_connector_connections", [])
+    %{rows: [[connection_id]]} =
+      SQL.query!(Repo, "SELECT id FROM people_connector_connections", [])
     foreign = %{tenant_id: 42, connection_id: connection_id}
 
     Fixtures.insert_projection!(
