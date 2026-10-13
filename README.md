@@ -47,8 +47,7 @@ missing dependency people/workforce`.
 
 [CI](.github/workflows/ci.yml) mounts the repositories into Bilimbi at the
 revision in [`.github/bilimbi-revision`](.github/bilimbi-revision). It verifies
-both mounted, People alone, neither mounted, and the expected failure when
-Connector is mounted without People. Update the pin when adopting a newer
+both mounted and the expected failure when Connector is mounted without People. Update the pin when adopting a newer
 Bilimbi revision. The People checkout uses its `main` branch.
 
 ## License

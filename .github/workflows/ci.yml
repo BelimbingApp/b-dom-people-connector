@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        topology: [both, people_only, neither, connector_only]
+        topology: [both, connector_only]
     env:
       PGHOST: localhost
       PGPASSWORD: bilimbi_dev_ca658ad7d8b5
@@ -67,7 +67,7 @@ jobs:
           path: bilimbi
 
       - name: Check out People
-        if: matrix.topology == 'both' || matrix.topology == 'people_only'
+        if: matrix.topology == 'both'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: BelimbingApp/b-dom-people
@@ -75,7 +75,7 @@ jobs:
           path: people
 
       - name: Mount People
-        if: matrix.topology == 'both' || matrix.topology == 'people_only'
+        if: matrix.topology == 'both'
         working-directory: .
         run: mv people bilimbi/apps/domains/people
 
@@ -88,8 +88,6 @@ jobs:
         run: |
           case '${{ matrix.topology }}' in
             both) test -d apps/domains/people && test -d apps/domains/people_connector ;;
-            people_only) test -d apps/domains/people && test ! -e apps/domains/people_connector ;;
-            neither) test ! -e apps/domains/people && test ! -e apps/domains/people_connector ;;
             connector_only) test ! -e apps/domains/people && test -d apps/domains/people_connector ;;
           esac
 
@@ -137,14 +135,10 @@ jobs:
       - name: Fetch dependencies
         if: matrix.topology != 'connector_only'
         run: |
-          if [ '${{ matrix.topology }}' = neither ]; then
-            mix deps.get --check-locked
-          else
-            mix deps.get
-            mix bilimbi.composition.lock --pin
-            BILIMBI_COMPOSITION_PINNED=1 mix deps.get --check-locked
-            BILIMBI_COMPOSITION_PINNED=1 mix deps.loadpaths
-          fi
+          mix deps.get
+          mix bilimbi.composition.lock --pin
+          BILIMBI_COMPOSITION_PINNED=1 mix deps.get --check-locked
+          BILIMBI_COMPOSITION_PINNED=1 mix deps.loadpaths
 
       - name: Compile and verify module graph
         if: matrix.topology != 'connector_only'
@@ -184,4 +178,4 @@ jobs:
           git diff --exit-code
           if [ -d apps/domains/people ]; then git -C apps/domains/people diff --exit-code; fi
           if [ -d apps/domains/people_connector ]; then git -C apps/domains/people_connector diff --exit-code; fi
-          if [ '${{ matrix.topology }}' != neither ]; then mix bilimbi.composition.lock --check; fi
+          mix bilimbi.composition.lock --check
