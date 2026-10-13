@@ -424,10 +424,9 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
             if connection.id != row.connection_id, do: Repo.rollback(:connection_changed)
 
             pending =
-              from(r in Record,
-                where: r.id == ^row.id and r.state == :pending,
-                lock: "FOR UPDATE"
-              )
+              query(scope, status.platform_company_id)
+              |> where([r], r.id == ^row.id and r.state == :pending)
+              |> lock("FOR UPDATE")
               |> Repo.one()
 
             if is_nil(pending), do: Repo.rollback(:file_exchange_abandoned)
@@ -454,18 +453,19 @@ defmodule Bilimbi.PeopleConnector.Connector.FileExchange do
 
           {:error, _} = error ->
             Artifacts.delete(scope, status.platform_company_id, Owner, artifact.id)
-            fail(row)
+            fail(scope, status, row)
             error
         end
 
       {:error, _} = error ->
-        fail(row)
+        fail(scope, status, row)
         error
     end
   end
 
-  defp fail(row) do
-    from(r in Record, where: r.id == ^row.id and r.state == :pending)
+  defp fail(scope, status, row) do
+    query(scope, status.platform_company_id)
+    |> where([r], r.id == ^row.id and r.state == :pending)
     |> Repo.update_all(set: [state: :failed, updated_at: DateTime.utc_now()])
   end
 

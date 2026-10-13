@@ -323,6 +323,45 @@ defmodule Bilimbi.PeopleConnector.Connector.BackupsTest do
     assert {:error, :checkpoint_moved} = Backup.recover(c.operator, 73, backup.id)
   end
 
+  test "rows carrying another tenant on this connection never block, enter or leave a backup",
+       c do
+    sync!(c, "own")
+    %{rows: [[connection_id]]} = SQL.query!(Repo, "SELECT id FROM people_connector_connections", [])
+    foreign = %{tenant_id: 42, connection_id: connection_id}
+
+    Fixtures.insert_projection!(
+      Map.merge(foreign, %{stable_id: "foreign-99", workforce_company_id: 73, name: "Foreign"})
+    )
+
+    # Another tenant's running pass is not this connection's sync in progress.
+    Fixtures.insert_run!(
+      Map.merge(foreign, %{platform_company_id: 73, idempotency_key: "foreign", state: "running"})
+    )
+
+    {:ok, backup} = Backup.create(c.operator, 73)
+    snapshot = Jason.decode!(File.read!(Path.join(c.root, backup.artifact_id)))
+    refute Enum.any?(snapshot["projections"], &(&1["stable_id"] == "foreign-99"))
+
+    {:ok, preview} = Backup.preview(c.operator, 73, backup.id)
+
+    assert {:ok, %{replayed?: false}} =
+             Backup.restore(c.operator, 73, backup.id, preview.token, true)
+
+    assert %{rows: [["Foreign", true]]} =
+             SQL.query!(
+               Repo,
+               "SELECT name, active FROM people_connector_workforce_records WHERE tenant_id = 42",
+               []
+             )
+
+    assert %{rows: [["running"]]} =
+             SQL.query!(
+               Repo,
+               "SELECT state FROM people_connector_sync_runs WHERE tenant_id = 42",
+               []
+             )
+  end
+
   test "storage/audit failures roll back restore and invalid settings are atomic", c do
     assert {:error, :invalid_backup_policy} =
              Backup.configure(c.operator, 73, %{"retention_days" => 1})

@@ -246,6 +246,75 @@ defmodule Bilimbi.PeopleConnector.Connector.TestFixtures do
     )
   end
 
+  @doc """
+  Stores a projected record directly. With another tenant's `tenant_id` on this
+  tenant's connection it is a row a tenant-scoped read must never see.
+  """
+  def insert_projection!(attributes) do
+    utc_query!(
+      Repo,
+      """
+      INSERT INTO people_connector_workforce_records
+        (tenant_id, connection_id, kind, source_id, stable_id, workforce_company_id, active,
+         name, code, content_hash, observed_at, inserted_at, updated_at)
+      VALUES ($1, $2, 'employee', 'people/native', $3, $4, true, $5, $3, 'fixture',
+        now(), now(), now())
+      """,
+      [
+        Map.fetch!(attributes, :tenant_id),
+        Map.fetch!(attributes, :connection_id),
+        Map.fetch!(attributes, :stable_id),
+        Map.fetch!(attributes, :workforce_company_id),
+        Map.get(attributes, :name, "Projected")
+      ]
+    )
+  end
+
+  @doc "Stores a sync run directly, under any tenant; it starts at `started_at`."
+  def insert_run!(attributes) do
+    utc_query!(
+      Repo,
+      """
+      INSERT INTO people_connector_sync_runs
+        (tenant_id, connection_id, platform_company_id, provider_id, idempotency_key, pass,
+         state, started_at, inserted_at, updated_at)
+      VALUES ($1, $2, $3, 'people.native', $4, 'bootstrap', $5, $6, now(), now())
+      """,
+      [
+        Map.fetch!(attributes, :tenant_id),
+        Map.fetch!(attributes, :connection_id),
+        Map.fetch!(attributes, :platform_company_id),
+        Map.fetch!(attributes, :idempotency_key),
+        Map.fetch!(attributes, :state),
+        Map.get(attributes, :started_at, NaiveDateTime.utc_now())
+      ]
+    )
+  end
+
+  @doc "Stores an open reconciliation issue directly, under any tenant; returns its id."
+  def insert_issue!(attributes) do
+    %{rows: [[id]]} =
+      utc_query!(
+        Repo,
+        """
+        INSERT INTO people_connector_reconciliation_issues
+          (tenant_id, connection_id, issue_key, kind, reason, severity, status,
+           first_seen_at, last_seen_at, inserted_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, 'error', 'open', now(), now(), now(), now())
+        RETURNING id
+        """,
+        [
+          Map.fetch!(attributes, :tenant_id),
+          Map.fetch!(attributes, :connection_id),
+          Map.fetch!(attributes, :issue_key),
+          Map.fetch!(attributes, :kind),
+          Map.fetch!(attributes, :reason)
+        ]
+      )
+
+    id
+  end
+
   @doc "Moves a run's start back, as a pass that stopped long ago would look."
   def age_run!(idempotency_key, minutes) do
     SQL.query!(
